@@ -17,12 +17,12 @@ Images/YouTube/audio sources · quizzes/flashcards · summaries · explainer vid
 
 ## Approach
 Build on **Open Notebook** (lfnovo/open-notebook, MIT, ~42k stars): already has notebooks, cited RAG chat, vector+full-text search, many BYOK providers, Docker, podcasts.
-Main gap = multi-user (upstream issue #712) → implement it, upstream-first, fork only if rejected. Study features later on top.
+Main gap = multi-user → implement it in our fork only. We never interact with upstream; we only pull its code updates read-only. Study features later on top.
 
 ## Next steps
 1. Clone Open Notebook, run it via Docker, verify MVP features vs. this brief (thinnest slice).
 2. Map its stack/data model; estimate multi-user (auth, per-user notebooks, admin keys + per-user key override).
-3. Comment on issue #712 with the proposed design; agree approach with maintainers.
+3. Write `docs/plans/multi-user.md` (goal, acceptance criteria, slices) for the implementing agent.
 4. Implement multi-user + key-override, TDD.
 5. Later: images/YouTube/audio sources, quizzes/flashcards, explainer video.
 
@@ -41,3 +41,5 @@ Main gap = multi-user (upstream issue #712) → implement it, upstream-first, fo
 | Multi-user per instance | Single user; single now, ready later | User choice (families/classrooms) |
 | Admin keys + per-user override | Admin only; per-user only | Shared key plus power-user BYOK |
 | Build on Open Notebook | Kotaemon; from scratch | Covers MVP + podcasts, MIT; only gap multi-user |
+| Fork-only, no upstream interaction | Upstream-first via #712 / Discussion #1254 | User choice; upstream design is post-v2 and undecided |
+| Keep pulling upstream code read-only | Clean break | Free bug/security fixes; accept merge conflicts |
