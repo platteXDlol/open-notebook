@@ -48,14 +48,14 @@ Or all at once: `make start-all` (status: `make status`, stop: `make stop-all`).
 | Contribution process (Discussions → Issues → PRs) | [docs/7-DEVELOPMENT/contributing.md](docs/7-DEVELOPMENT/contributing.md) |
 | User/operator docs (install, configure, troubleshoot) | [docs/](docs/index.md) |
 
-## Fork workflow (platteXDlol fork only — never part of upstream PRs)
+## Fork workflow (fork-only development — overrides upstream contribution rules above)
 
-This clone is the fork `platteXDlol/open-notebook`; we contribute to `lfnovo/open-notebook`. Goal and decisions: [docs/BRIEF.md](docs/BRIEF.md).
+This clone is the fork `platteXDlol/open-notebook`. **We never interact with upstream `lfnovo/open-notebook`**: no PRs, issues, discussions or comments there. We only pull its code read-only. Goal and decisions: [docs/BRIEF.md](docs/BRIEF.md).
 
-- Remotes: `origin` = `platteXDlol/open-notebook` (push here) · `upstream` = `lfnovo/open-notebook` (fetch only).
+- Remotes: `origin` = `platteXDlol/open-notebook` (push here) · `upstream` = `lfnovo/open-notebook` (fetch only; push URL disabled). `gh` default repo = the fork.
 - Commits and pushes are made as **HLC-Penumbra** (`328856535+HLC-Penumbra@users.noreply.github.com`, set in repo-local git config).
-- **Never commit to `main`.** `main` is an exact mirror of `upstream/main`; a ruleset blocks direct pushes (PR required, no force push, no deletion) for HLC-Penumbra; only **platteXDlol** syncs it, via GitHub's "Sync fork" button (ruleset bypass). Locally: `git fetch upstream && git checkout main && git merge --ff-only upstream/main` (never push).
-- `fork/main` = fork-only files (this section, `docs/BRIEF.md`). Default branch of the fork. After each sync, bring `main` in via a PR from `main` into `fork/main` (merge, not rebase — force pushes are blocked). Never base upstream PRs on it.
-- Work branches start from `main`, named by Conventional Commit type: `feat/…`, `fix/…`, `docs/…`, `refactor/…`, `test/…`, `chore/…` (e.g. `feat/multi-user`). Upstream PRs go from these branches to `lfnovo/open-notebook:main`.
-- `fork/main` is protected too: fork-only changes (BRIEF, this section) go on a branch from `fork/main` and a PR into `fork/main` on the fork (`gh pr create --repo platteXDlol/open-notebook --base fork/main`), never into a work branch.
-- Before every push, run the full CI set locally (see [Commands](#commands)): ruff check + format --check, mypy, pytest, and in `frontend/` lint, `test:coverage`, build. GitHub Actions on the fork is only a safety net; upstream CI is the real gate.
+- **`fork/main`** = our product line and default branch. Protected by a ruleset (PR required, no force push, no deletion). All work lands here via PR.
+- **`main`** = read-only mirror of `upstream/main`. Never commit to it. Only **platteXDlol** syncs it with GitHub's "Sync fork" button (ruleset bypass). Then bring it in via a PR from `main` into `fork/main` (merge, not rebase).
+- Work branches start from `fork/main`, named by Conventional Commit type: `feat/…`, `fix/…`, `docs/…`, `refactor/…`, `test/…`, `chore/…` (e.g. `feat/multi-user`). PR: `gh pr create --base fork/main`.
+- Feature plans live in `docs/plans/<feature>.md`; implement from them.
+- Before every push, run the full CI set locally (see [Commands](#commands)): ruff check + format --check, mypy, pytest, and in `frontend/` lint, `test:coverage`, build. GitHub Actions is only a safety net.
