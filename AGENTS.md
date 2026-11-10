@@ -47,3 +47,14 @@ Or all at once: `make start-all` (status: `make status`, stop: `make stop-all`).
 | Decision log (ADRs/PDRs) | [docs/7-DEVELOPMENT/decisions/](docs/7-DEVELOPMENT/decisions/) |
 | Contribution process (Discussions → Issues → PRs) | [docs/7-DEVELOPMENT/contributing.md](docs/7-DEVELOPMENT/contributing.md) |
 | User/operator docs (install, configure, troubleshoot) | [docs/](docs/index.md) |
+
+## Fork workflow (platteXDlol fork only — never part of upstream PRs)
+
+This clone is the fork `platteXDlol/open-notebook`; we contribute to `lfnovo/open-notebook`. Goal and decisions: [docs/BRIEF.md](docs/BRIEF.md).
+
+- Remotes: `origin` = `platteXDlol/open-notebook` (push here) · `upstream` = `lfnovo/open-notebook` (fetch only).
+- Commits and pushes are made as **HLC-Penumbra** (`328856535+HLC-Penumbra@users.noreply.github.com`, set in repo-local git config).
+- **Never commit to `main`.** `main` is an exact mirror of `upstream/main`; update it only with `git fetch upstream && git checkout main && git merge --ff-only upstream/main && git push origin main`.
+- `fork/main` = fork-only files (this section, `docs/BRIEF.md`). Default branch of the fork. Rebase it on `main` after each sync. Never base upstream PRs on it.
+- Work branches start from `main`, named by Conventional Commit type: `feat/…`, `fix/…`, `docs/…`, `refactor/…`, `test/…`, `chore/…` (e.g. `feat/multi-user`). Upstream PRs go from these branches to `lfnovo/open-notebook:main`.
+- Fork-only changes (BRIEF, this section) go on a branch from `fork/main` and merge back into `fork/main`, never into a work branch.
