@@ -14,7 +14,6 @@ GET /api/providers at runtime, so it needs no cross-check.
 from typing import get_args
 
 import pytest
-from fastapi.testclient import TestClient
 from pydantic import ValidationError
 
 from api.models import CreateCredentialRequest, SupportedProvider
@@ -49,10 +48,12 @@ KNOWN_GOOD_PROVIDERS = [
 
 
 @pytest.fixture
-def client():
+def client(api_session_test):
+    from conftest import authed_client
+
     from api.main import app
 
-    return TestClient(app)
+    return authed_client(app)
 
 
 class TestProviderRegistryIsTheSourceOfTruth:

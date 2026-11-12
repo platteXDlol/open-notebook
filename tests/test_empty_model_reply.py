@@ -164,12 +164,18 @@ async def test_source_chat_failed_turn_is_rolled_back_and_retry_is_clean():
     ]
 
 
+@pytest.fixture(autouse=True)
+def _session(api_session_test):
+    """The router test acts as the fake admin (no live DB)."""
+    yield
+
+
 def test_notebook_chat_failed_turn_is_rolled_back_and_retry_is_clean():
-    from fastapi.testclient import TestClient
+    from conftest import authed_client
 
     from api.main import app
 
-    client = TestClient(app)
+    client = authed_client(app)
     graph = _toy_graph(["", "the answer"])
     session = MagicMock(model_override=None, save=AsyncMock())
     with (

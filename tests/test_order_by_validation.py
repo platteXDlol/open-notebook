@@ -57,12 +57,12 @@ class TestGetNotebooksOrderBy:
     its stricter field allowlist on top (#1416)."""
 
     @pytest.fixture
-    def client(self):
-        from fastapi.testclient import TestClient
+    def client(self, api_session_test):
+        from conftest import authed_client
 
         from api.main import app
 
-        return TestClient(app)
+        return authed_client(app)
 
     @pytest.mark.parametrize(
         "order_by,expected",

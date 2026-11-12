@@ -122,6 +122,23 @@ class User(ObjectModel):
             raise DatabaseOperationError(f"Failed to create user: {e}") from e
         return cls(**record)
 
+    @classmethod
+    async def get_by_username(cls, username: str) -> Optional["User"]:
+        """Return the user with this exact username, or None."""
+        rows = await repo_query(
+            "SELECT * FROM user WHERE username = $username LIMIT 1",
+            {"username": username},
+        )
+        if not rows:
+            return None
+        return cls(**rows[0])
+
+    @classmethod
+    async def any_exists(cls) -> bool:
+        """True if at least one user exists (drives the /setup gate)."""
+        rows = await repo_query("SELECT count() as count FROM user GROUP ALL")
+        return bool(rows) and int(rows[0].get("count", 0)) > 0
+
 
 class Session(ObjectModel):
     table_name: ClassVar[str] = "session"

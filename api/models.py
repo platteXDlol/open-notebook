@@ -1,6 +1,39 @@
+from datetime import datetime
 from typing import Any, Dict, List, Literal, Optional
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
+
+
+# Auth models (multi-user slice 2)
+class AuthRequest(BaseModel):
+    username: str = Field(..., min_length=1, description="Username")
+    password: str = Field(..., min_length=1, description="Password")
+
+
+class PasswordChangeRequest(BaseModel):
+    current_password: str = Field(..., min_length=1)
+    new_password: str = Field(..., min_length=1)
+
+
+class PasswordResetRequest(BaseModel):
+    password: str = Field(..., min_length=1, description="New password")
+
+
+class UserCreateRequest(BaseModel):
+    username: str = Field(..., min_length=1, description="Username")
+    password: str = Field(..., min_length=1, description="Password")
+    role: Literal["admin", "user"] = Field("user", description="Role of the new user")
+
+
+class UserResponse(BaseModel):
+    """Safe, public view of a user (never includes password_hash)."""
+
+    model_config = ConfigDict(from_attributes=True)
+
+    id: Optional[str]
+    username: str
+    role: str
+    created: Optional[datetime]
 
 
 # Notebook models

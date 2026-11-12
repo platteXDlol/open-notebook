@@ -7,17 +7,18 @@ untouched.
 from unittest.mock import AsyncMock, patch
 
 import pytest
-from fastapi.testclient import TestClient
 
 from open_notebook.domain.notebook import Notebook
 from open_notebook.domain.transformation import Transformation
 
 
 @pytest.fixture
-def client():
+def client(api_session_test):
+    from conftest import authed_client
+
     from api.main import app
 
-    return TestClient(app)
+    return authed_client(app)
 
 
 def _notebook():
