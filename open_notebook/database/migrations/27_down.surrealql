@@ -1,0 +1,5 @@
+-- Rollback Migration 27: Remove multi-user tables (slice 1 of docs/plans/multi-user.md)
+REMOVE INDEX idx_session_token_hash ON session;
+REMOVE TABLE session;
+REMOVE INDEX idx_user_username ON user;
+REMOVE TABLE user;

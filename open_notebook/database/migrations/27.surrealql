@@ -1,0 +1,20 @@
+-- Migration 27: Multi-user accounts (slice 1 of docs/plans/multi-user.md)
+-- user: accounts with scrypt-hashed passwords and a role (admin | user)
+-- session: server-side auth sessions; only the sha256 hash of the session
+-- token is stored (the raw token lives in the client's cookie)
+DEFINE TABLE user SCHEMAFULL;
+DEFINE FIELD username ON user TYPE string;
+DEFINE FIELD password_hash ON user TYPE string;
+DEFINE FIELD role ON user TYPE string DEFAULT 'user';
+DEFINE FIELD auth_provider ON user TYPE string DEFAULT 'local';
+DEFINE FIELD created ON user TYPE option<datetime> DEFAULT time::now();
+DEFINE FIELD updated ON user TYPE option<datetime> DEFAULT time::now();
+DEFINE INDEX idx_user_username ON user FIELDS username UNIQUE;
+
+DEFINE TABLE session SCHEMAFULL;
+DEFINE FIELD token_hash ON session TYPE string;
+DEFINE FIELD user ON session TYPE record<user>;
+DEFINE FIELD expires ON session TYPE datetime;
+DEFINE FIELD created ON session TYPE option<datetime> DEFAULT time::now();
+DEFINE FIELD updated ON session TYPE option<datetime> DEFAULT time::now();
+DEFINE INDEX idx_session_token_hash ON session FIELDS token_hash UNIQUE;
