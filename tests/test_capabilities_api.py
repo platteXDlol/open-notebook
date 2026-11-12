@@ -8,14 +8,15 @@ local package is installed OR a remote server is configured.
 """
 
 import pytest
-from fastapi.testclient import TestClient
 
 
 @pytest.fixture
-def client():
+def client(api_session_test):
+    from conftest import authed_client
+
     from api.main import app
 
-    return TestClient(app)
+    return authed_client(app)
 
 
 def _patch_probes(monkeypatch, *, docling, crawl4ai_local, crawl4ai_remote):

@@ -1,88 +1,274 @@
-"""Tests for API password authentication middleware."""
+"""Tests for the session auth middleware and /api/auth endpoints (slice 2).
+
+The middleware authenticates /api/* requests via the `on_session` cookie and
+sets `current_user`. Fresh instances (no user exists) get 409
+`{"detail": "setup_required"}` on every protected path until /api/auth/setup
+has created the first admin.
+"""
+
+from unittest.mock import AsyncMock
 
 import pytest
-from fastapi import Request
-from starlette.responses import Response
-from starlette.types import Receive, Scope, Send
+from fastapi.testclient import TestClient
 
-from api.auth import PasswordAuthMiddleware
+from api import main as api_main
+from api.routers import auth as auth_router
+from open_notebook.domain.user import User, hash_password, verify_password
 
-
-async def _unused_app(_: Scope, __: Receive, ___: Send) -> None:
-    raise AssertionError("dispatch should use the supplied call_next")
-
-
-async def _allow_request(_: Request) -> Response:
-    return Response(status_code=200)
+AUTH_HEADERS = {"Cookie": "on_session=tok"}
+SESSION_COOKIE = "on_session"
 
 
-async def _request(
-    monkeypatch: pytest.MonkeyPatch,
-    *,
-    password: str | None,
-    credentials: bytes | None = None,
-) -> int:
-    if password is None:
-        monkeypatch.delenv("OPEN_NOTEBOOK_PASSWORD", raising=False)
-    else:
-        monkeypatch.setenv("OPEN_NOTEBOOK_PASSWORD", password)
-
-    headers = []
-    if credentials is not None:
-        headers.append((b"authorization", b"Bearer " + credentials))
-
-    scope: Scope = {
-        "type": "http",
-        "method": "GET",
-        "path": "/protected",
-        "headers": headers,
-    }
-    middleware = PasswordAuthMiddleware(_unused_app)
-    response = await middleware.dispatch(Request(scope), _allow_request)
-    return response.status_code
+def _admin() -> User:
+    return User(
+        id="user:admin1",
+        username="ada",
+        password_hash=hash_password("admin-pw"),
+        role="admin",
+    )
 
 
-class TestPasswordAuthMiddleware:
-    @pytest.mark.asyncio
-    async def test_accepts_ascii_password(
-        self, monkeypatch: pytest.MonkeyPatch
-    ) -> None:
-        status = await _request(monkeypatch, password="secret", credentials=b"secret")
-
-        assert status == 200
-
-    @pytest.mark.asyncio
-    async def test_rejects_wrong_password(
-        self, monkeypatch: pytest.MonkeyPatch
-    ) -> None:
-        status = await _request(monkeypatch, password="secret", credentials=b"wrong")
-
-        assert status == 401
+def _member() -> User:
+    return User(
+        id="user:member1",
+        username="bob",
+        password_hash=hash_password("member-pw"),
+        role="user",
+    )
 
 
-class TestNoPasswordConfigured:
-    @pytest.mark.asyncio
-    async def test_allows_request(self, monkeypatch: pytest.MonkeyPatch) -> None:
-        status = await _request(monkeypatch, password=None)
-
-        assert status == 200
+@pytest.fixture
+def client():
+    return TestClient(api_main.app)
 
 
-class TestNonAsciiPassword:
-    @pytest.mark.asyncio
-    async def test_accepts_utf8_password(self, monkeypatch: pytest.MonkeyPatch) -> None:
-        password = "pässwörd-中文"
+@pytest.fixture(autouse=True)
+def _clear_login_failures():
+    """Rate limit state is process-global; keep tests isolated."""
+    auth_router._login_failures.clear()
 
-        status = await _request(
-            monkeypatch, password=password, credentials=password.encode("utf-8")
+
+class TestSessionAuthMiddleware:
+    def test_api_401_without_cookie_when_users_exist(self, monkeypatch, client):
+        monkeypatch.setattr(User, "any_exists", AsyncMock(return_value=True))
+        assert client.get("/api/notebooks").status_code == 401
+
+    def test_api_409_setup_required_when_no_users(self, monkeypatch, client):
+        monkeypatch.setattr(User, "any_exists", AsyncMock(return_value=False))
+        response = client.get("/api/notebooks")
+        assert response.status_code == 409
+        assert response.json() == {"detail": "setup_required"}
+
+    def test_api_fails_closed_when_user_check_errors(self, monkeypatch, client):
+        monkeypatch.setattr(
+            User, "any_exists", AsyncMock(side_effect=RuntimeError("db down"))
         )
+        assert client.get("/api/notebooks").status_code == 401
 
-        assert status == 200
+    def test_invalid_cookie_401(self, monkeypatch, client):
+        monkeypatch.setattr(
+            "open_notebook.domain.user.Session.resolve", AsyncMock(return_value=None)
+        )
+        monkeypatch.setattr(User, "any_exists", AsyncMock(return_value=True))
+        assert client.get("/api/notebooks", headers=AUTH_HEADERS).status_code == 401
 
-    @pytest.mark.asyncio
-    async def test_invalid_utf8_returns_unauthorized(
-        self, monkeypatch: pytest.MonkeyPatch
-    ) -> None:
-        status = await _request(monkeypatch, password="secret", credentials=b"\xff")
+    def test_valid_cookie_passes_and_sets_current_user(self, monkeypatch, client):
+        monkeypatch.setattr(
+            "open_notebook.domain.user.Session.resolve",
+            AsyncMock(return_value=_admin()),
+        )
+        response = client.get("/api/auth/me", headers=AUTH_HEADERS)
+        assert response.status_code == 200
+        body = response.json()
+        assert body["username"] == "ada"
+        assert body["role"] == "admin"
 
-        assert status == 401
+    def test_non_api_paths_need_no_session(self, client):
+        assert client.get("/health").status_code == 200
+
+
+class TestAuthStatus:
+    def test_status_reports_setup_required_without_cookie(self, monkeypatch, client):
+        monkeypatch.setattr(User, "any_exists", AsyncMock(return_value=False))
+        body = client.get("/api/auth/status").json()
+        assert body == {"setup_required": True, "user": None}
+
+    def test_status_reports_user_when_authenticated(self, monkeypatch, client):
+        monkeypatch.setattr(
+            "open_notebook.domain.user.Session.resolve",
+            AsyncMock(return_value=_member()),
+        )
+        monkeypatch.setattr(User, "any_exists", AsyncMock(return_value=True))
+        body = client.get("/api/auth/status", headers=AUTH_HEADERS).json()
+        assert body["setup_required"] is False
+        assert body["user"]["username"] == "bob"
+        assert body["user"]["role"] == "user"
+        assert "password_hash" not in body["user"]
+
+
+class TestAuthSetup:
+    def test_setup_creates_admin_and_logs_in(self, monkeypatch, client):
+        monkeypatch.setattr(User, "any_exists", AsyncMock(return_value=False))
+        mock_create = AsyncMock(return_value=_admin())
+        monkeypatch.setattr(User, "create", mock_create)
+        mock_session = AsyncMock(return_value="tok-setup")
+        monkeypatch.setattr("open_notebook.domain.user.Session.create", mock_session)
+
+        response = client.post(
+            "/api/auth/setup", json={"username": "ada", "password": "setup-pw"}
+        )
+        assert response.status_code == 200
+        assert response.json()["username"] == "ada"
+        assert response.json()["role"] == "admin"
+        mock_create.assert_awaited_once_with("ada", "setup-pw", role="admin")
+        mock_session.assert_awaited_once()
+
+        cookie = response.headers["set-cookie"]
+        assert cookie.startswith(f"{SESSION_COOKIE}=tok-setup")
+        for flag in ("Max-Age=2592000", "Path=/", "SameSite=Lax", "HttpOnly"):
+            assert flag.lower() in cookie.lower()
+
+    def test_setup_refused_when_users_exist(self, monkeypatch, client):
+        monkeypatch.setattr(User, "any_exists", AsyncMock(return_value=True))
+        response = client.post(
+            "/api/auth/setup", json={"username": "ada", "password": "setup-pw"}
+        )
+        assert response.status_code == 409
+
+
+class TestAuthLogin:
+    def test_login_success_sets_session_cookie(self, monkeypatch, client):
+        user = _member()
+        monkeypatch.setattr(User, "get_by_username", AsyncMock(return_value=user))
+        mock_session = AsyncMock(return_value="tok-login")
+        monkeypatch.setattr("open_notebook.domain.user.Session.create", mock_session)
+
+        response = client.post(
+            "/api/auth/login", json={"username": "bob", "password": "member-pw"}
+        )
+        assert response.status_code == 200
+        assert response.json()["username"] == "bob"
+        assert response.headers["set-cookie"].startswith(f"{SESSION_COOKIE}=tok-login")
+        mock_session.assert_awaited_once_with(user)
+
+    def test_login_wrong_password_401(self, monkeypatch, client):
+        monkeypatch.setattr(User, "get_by_username", AsyncMock(return_value=_member()))
+        response = client.post(
+            "/api/auth/login", json={"username": "bob", "password": "nope"}
+        )
+        assert response.status_code == 401
+
+    def test_login_unknown_user_401(self, monkeypatch, client):
+        monkeypatch.setattr(User, "get_by_username", AsyncMock(return_value=None))
+        response = client.post(
+            "/api/auth/login", json={"username": "ghost", "password": "x"}
+        )
+        assert response.status_code == 401
+
+
+class TestLoginRateLimit:
+    def test_eleventh_failure_in_window_is_429(self, monkeypatch, client):
+        monkeypatch.setattr(User, "get_by_username", AsyncMock(return_value=None))
+        for _ in range(10):
+            response = client.post(
+                "/api/auth/login", json={"username": "ada", "password": "x"}
+            )
+            assert response.status_code == 401
+        response = client.post(
+            "/api/auth/login", json={"username": "ada", "password": "x"}
+        )
+        assert response.status_code == 429
+
+    def test_limit_is_per_username(self, monkeypatch, client):
+        monkeypatch.setattr(User, "get_by_username", AsyncMock(return_value=None))
+        for _ in range(10):
+            client.post("/api/auth/login", json={"username": "ada", "password": "x"})
+        response = client.post(
+            "/api/auth/login", json={"username": "bob", "password": "x"}
+        )
+        assert response.status_code == 401
+
+    def test_successful_login_clears_failures(self, monkeypatch, client):
+        user = _member()
+        monkeypatch.setattr(User, "get_by_username", AsyncMock(return_value=user))
+        monkeypatch.setattr(
+            "open_notebook.domain.user.Session.create", AsyncMock(return_value="tok")
+        )
+        for _ in range(5):
+            client.post(
+                "/api/auth/login", json={"username": "bob", "password": "wrong"}
+            )
+        response = client.post(
+            "/api/auth/login", json={"username": "bob", "password": "member-pw"}
+        )
+        assert response.status_code == 200
+        for _ in range(5):
+            client.post(
+                "/api/auth/login", json={"username": "bob", "password": "wrong"}
+            )
+        response = client.post(
+            "/api/auth/login", json={"username": "bob", "password": "member-pw"}
+        )
+        assert response.status_code == 200
+
+
+class TestAuthLogout:
+    def test_logout_revokes_session_and_clears_cookie(self, monkeypatch, client):
+        monkeypatch.setattr(
+            "open_notebook.domain.user.Session.resolve",
+            AsyncMock(return_value=_member()),
+        )
+        mock_revoke = AsyncMock()
+        monkeypatch.setattr("open_notebook.domain.user.Session.revoke", mock_revoke)
+
+        response = client.post("/api/auth/logout", headers=AUTH_HEADERS)
+        assert response.status_code == 200
+        mock_revoke.assert_awaited_once_with("tok")
+        cookie = response.headers["set-cookie"]
+        assert cookie.startswith(f"{SESSION_COOKIE}=")
+        assert "Max-Age=0" in cookie
+
+    def test_logout_without_cookie_401(self, monkeypatch, client):
+        monkeypatch.setattr(User, "any_exists", AsyncMock(return_value=True))
+        assert client.post("/api/auth/logout").status_code == 401
+
+
+class TestAuthMe:
+    def test_me_without_cookie_401(self, monkeypatch, client):
+        monkeypatch.setattr(User, "any_exists", AsyncMock(return_value=True))
+        assert client.get("/api/auth/me").status_code == 401
+
+
+class TestChangePassword:
+    def test_change_own_password(self, monkeypatch, client):
+        user = _member()
+        monkeypatch.setattr(
+            "open_notebook.domain.user.Session.resolve", AsyncMock(return_value=user)
+        )
+        mock_save = AsyncMock()
+        monkeypatch.setattr(User, "save", mock_save)
+
+        response = client.put(
+            "/api/auth/me/password",
+            json={"current_password": "member-pw", "new_password": "new-pw-123"},
+            headers=AUTH_HEADERS,
+        )
+        assert response.status_code == 200
+        assert verify_password("new-pw-123", user.password_hash)
+        mock_save.assert_awaited_once()
+
+    def test_change_own_password_wrong_current_401(self, monkeypatch, client):
+        user = _member()
+        monkeypatch.setattr(
+            "open_notebook.domain.user.Session.resolve", AsyncMock(return_value=user)
+        )
+        mock_save = AsyncMock()
+        monkeypatch.setattr(User, "save", mock_save)
+
+        response = client.put(
+            "/api/auth/me/password",
+            json={"current_password": "wrong", "new_password": "new-pw-123"},
+            headers=AUTH_HEADERS,
+        )
+        assert response.status_code == 401
+        mock_save.assert_not_awaited()

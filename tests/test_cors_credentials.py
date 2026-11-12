@@ -9,8 +9,10 @@ allow_credentials is now keyed on the parsed origins list: False whenever it
 contains "*" (whether from the unset default or an explicit CORS_ORIGINS=*),
 True once an operator scopes CORS_ORIGINS to specific origins.
 
-Without OPEN_NOTEBOOK_PASSWORD and with CORS_ORIGINS unset, the default only
-admits localhost origins and origins on the host the API was reached at.
+With CORS_ORIGINS unset, the default only admits localhost origins and
+origins on the host the API was reached at. Since multi-user slice 2 the
+API authenticates with session cookies, so credentials are allowed for the
+default (same-host) policy and for explicit origin lists - never for '*'.
 """
 
 from typing import cast
@@ -23,25 +25,27 @@ from api import main as api_main
 from api.cors import SameHostCORSMiddleware, origin_matches_host
 
 
-class TestRealAppWithoutPasswordIsSameHostOnly:
-    """The test environment sets no password and no CORS_ORIGINS, matching
-    the shipped default - this validates the actual registered app, not a
-    simulation. Without a password the default only admits localhost origins
-    and origins on the host the API was reached at."""
+class TestRealAppDefaultIsSameHostOnly:
+    """The test environment sets no CORS_ORIGINS, matching the shipped
+    default - this validates the actual registered app, not a simulation.
+    The default only admits localhost origins and origins on the host the
+    API was reached at."""
 
     def test_default_test_environment_is_same_host_only(self):
         assert api_main.CORS_SAME_HOST_ONLY is True
-        assert api_main.CORS_IS_DEFAULT_WILDCARD is False
         assert api_main.CORS_ALLOWED_ORIGINS == []
         assert api_main.CORS_ALLOWED_ORIGIN_REGEX == api_main.LOCALHOST_ORIGIN_REGEX
-        assert api_main.CORS_ALLOW_CREDENTIALS is False
+        # Session cookies need Access-Control-Allow-Credentials for the
+        # default localhost/same-host UI; the default policy only reflects
+        # localhost or same-host origins (never '*'), so credentials are on.
+        assert api_main.CORS_ALLOW_CREDENTIALS is True
 
     def test_cors_middleware_registered_with_same_host(self):
         matches = [
             m for m in api_main.app.user_middleware if m.cls is SameHostCORSMiddleware
         ]
         assert len(matches) == 1
-        assert matches[0].kwargs["allow_credentials"] is False
+        assert matches[0].kwargs["allow_credentials"] is True
         assert matches[0].kwargs["allow_same_host"] is True
         assert (
             matches[0].kwargs["allow_origin_regex"] == api_main.LOCALHOST_ORIGIN_REGEX
@@ -62,9 +66,10 @@ class TestRealAppWithoutPasswordIsSameHostOnly:
         response = client.get("/health", headers={"Origin": origin})
         assert response.status_code == 200
         assert response.headers.get("access-control-allow-origin") == origin
-        assert "access-control-allow-credentials" not in {
-            k.lower() for k in response.headers.keys()
-        }
+        # Credentials are enabled for the default UI (session cookies); this
+        # is safe because the default policy only reflects localhost or
+        # same-host origins, never arbitrary ones.
+        assert response.headers["access-control-allow-credentials"] == "true"
 
     @pytest.mark.parametrize(
         "origin",
@@ -178,27 +183,21 @@ class TestOriginMatchesHost:
 
 class TestSameHostPolicySelection:
     """CORS_SAME_HOST_ONLY is fixed at api.main import time, so these exercise
-    the same predicate used there."""
+    the same predicate used there. The password branch was removed in
+    multi-user slice 2: the same-host default applies whenever
+    CORS_ORIGINS is unset."""
 
     def test_blank_cors_origins_counts_as_unset(self):
-        assert api_main._uses_same_host_cors("  ", password_set=False) is True
+        assert api_main._uses_same_host_cors("  ") is True
 
-    def test_no_password_and_no_cors_origins_is_same_host_only(self):
-        assert api_main._uses_same_host_cors(None, password_set=False) is True
+    def test_unset_cors_origins_is_same_host_only(self):
+        assert api_main._uses_same_host_cors(None) is True
 
-    def test_password_keeps_the_wildcard_default(self):
-        assert api_main._uses_same_host_cors(None, password_set=True) is False
+    def test_explicit_cors_origins_keep_the_allowlist(self):
+        assert api_main._uses_same_host_cors("http://192.168.1.10:8502") is False
 
-    def test_explicit_cors_origins_are_kept_without_password(self):
-        assert (
-            api_main._uses_same_host_cors(
-                "http://192.168.1.10:8502", password_set=False
-            )
-            is False
-        )
-
-    def test_explicit_wildcard_is_kept_without_password(self):
-        assert api_main._uses_same_host_cors("*", password_set=False) is False
+    def test_explicit_wildcard_keeps_the_allowlist(self):
+        assert api_main._uses_same_host_cors("*") is False
 
 
 class TestExplicitWildcardAlsoDisablesCredentials:

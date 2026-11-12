@@ -1,15 +1,24 @@
 from datetime import datetime
 from unittest.mock import AsyncMock, patch
 
+import pytest
 from fastapi.testclient import TestClient
 
 from open_notebook.domain.transformation import Transformation
 
 
 def _client() -> TestClient:
+    from conftest import authed_client
+
     from api.main import app
 
-    return TestClient(app)
+    return authed_client(app)
+
+
+@pytest.fixture(autouse=True)
+def _session(api_session_test):
+    """Every transformation test acts as the fake admin (no live DB)."""
+    yield
 
 
 def _transformation(model_id: str | None = None) -> Transformation:

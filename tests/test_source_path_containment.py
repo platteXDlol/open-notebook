@@ -14,7 +14,6 @@ these lock in the fix and guard against regressions.
 from unittest.mock import AsyncMock, patch
 
 import pytest
-from fastapi.testclient import TestClient
 
 from api.routers.sources import _is_source_file_available, _resolve_source_file
 from open_notebook.config import UPLOADS_FOLDER
@@ -32,10 +31,12 @@ def make_source(file_path=None, **overrides):
 
 
 @pytest.fixture
-def client():
+def client(api_session_test):
+    from conftest import authed_client
+
     from api.main import app
 
-    return TestClient(app)
+    return authed_client(app)
 
 
 class TestIsSourceFileAvailableRejectsSiblingDirectoryBypass:

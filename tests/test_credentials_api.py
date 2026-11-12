@@ -5,18 +5,19 @@ from unittest.mock import AsyncMock, patch
 
 import httpx
 import pytest
-from fastapi.testclient import TestClient
 from pydantic import SecretStr
 
 from api import credentials_service
 
 
 @pytest.fixture
-def client():
+def client(api_session_test):
     """Create test client after environment variables have been cleared by conftest."""
+    from conftest import authed_client
+
     from api.main import app
 
-    return TestClient(app)
+    return authed_client(app)
 
 
 class TestCredentialCascadeDelete:
