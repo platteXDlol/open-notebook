@@ -3,6 +3,7 @@
 from unittest.mock import AsyncMock, patch
 
 import pytest
+from conftest import TEST_ADMIN_USER
 
 from open_notebook.domain.notebook import Source
 
@@ -92,8 +93,14 @@ class TestRecentlyViewedApi:
         data = response.json()
         assert [item["id"] for item in data] == ["source:1", "notebook:1"]
         assert len(data) == 2
-        assert mock_repo_query.await_args_list[0].args[1] == {"limit": 2}
-        assert mock_repo_query.await_args_list[1].args[1] == {"limit": 2}
+        assert mock_repo_query.await_args_list[0].args[1] == {
+            "owner": TEST_ADMIN_USER.id,
+            "limit": 2,
+        }
+        assert mock_repo_query.await_args_list[1].args[1] == {
+            "owner": TEST_ADMIN_USER.id,
+            "limit": 2,
+        }
 
     @patch("api.routers.notebooks.repo_query", new_callable=AsyncMock)
     def test_recently_viewed_empty_when_no_view_history(self, mock_repo_query, client):

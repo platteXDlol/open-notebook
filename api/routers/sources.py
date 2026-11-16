@@ -302,6 +302,10 @@ async def get_sources(
         else:
             from_clause = "source"
 
+        owner_where, owner_params = Source._owner_scope()
+        owner_clause = f"WHERE {owner_where}" if owner_where else ""
+        params.update(owner_params)
+
         # Query sources - include command field with FETCH
         query = f"""
             SELECT id, asset, created, title, updated, topics, command,
@@ -310,6 +314,7 @@ async def get_sources(
             (SELECT VALUE count() FROM source_insight WHERE source = $parent.id GROUP ALL)[0].count OR 0 AS insights_count,
             (SELECT VALUE id FROM source_embedding WHERE source = $parent.id LIMIT 1) != [] AS embedded
             FROM {from_clause}
+            {owner_clause}
             {order_clause}
             LIMIT $limit START $offset
             FETCH command

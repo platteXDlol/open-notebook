@@ -54,12 +54,25 @@ TEST_ADMIN_USER = User(
     password_hash="scrypt$16384$8$1$aGVhZGxlc3M$bm90LXZlcmlmaWVk",
     role="admin",
 )
+# Second user (slice 3 isolation tests): a regular user with no admin rights.
+TEST_USER_B = User(
+    id="user:tests-b",
+    username="test-user-b",
+    password_hash="scrypt$16384$8$1$aGVhZGxlc3M$bm90LXZlcmlmaWVk",
+    role="user",
+)
 TEST_AUTH_COOKIE = {"Cookie": "on_session=unit-test-session"}
+USER_B_COOKIE = {"Cookie": "on_session=user-b-token"}
 
 
 def authed_client(app, **kwargs) -> TestClient:
     """TestClient that always sends a valid on_session cookie."""
     return TestClient(app, headers=TEST_AUTH_COOKIE, **kwargs)
+
+
+def user_b_client(app, **kwargs) -> TestClient:
+    """TestClient that authenticates as the non-admin second user."""
+    return TestClient(app, headers=USER_B_COOKIE, **kwargs)
 
 
 @pytest.fixture
@@ -68,6 +81,34 @@ def api_session_test():
 
     async def _resolve(raw_token):
         return TEST_ADMIN_USER
+
+    async def _any_exists():
+        return True
+
+    with (
+        patch("open_notebook.domain.user.Session.resolve", new=_resolve),
+        patch("open_notebook.domain.user.User.any_exists", new=_any_exists),
+    ):
+        yield
+
+
+@pytest.fixture
+def two_user_session():
+    """Deterministic session resolution for two distinct users (no DB needed).
+
+    Maps the admin cookie to TEST_ADMIN_USER and the user-b cookie to
+    TEST_USER_B; any other token resolves to None (unauthenticated).
+    """
+
+    sessions = {
+        "unit-test-session": TEST_ADMIN_USER,
+        "user-b-token": TEST_USER_B,
+    }
+
+    async def _resolve(raw_token):
+        if raw_token is None:
+            return None
+        return sessions.get(raw_token)
 
     async def _any_exists():
         return True

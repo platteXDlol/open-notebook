@@ -1,0 +1,227 @@
+-- Migration 28: per-user ownership (multi-user slice 3, docs/plans/multi-user.md)
+--
+-- Adds `owner: option<record<user>>` to every content table (notebook, source,
+-- note, chat_session, source_embedding, source_insight, episode, artifact) and
+-- to the shared tables (model, credential, transformation, episode_profile,
+-- speaker_profile), where owner = NONE keeps meaning "global / legacy".
+-- Python ObjectModel classes stamp and filter on this field; rows created by
+-- the worker or before multi-user were enabled stay owner = NONE and remain
+-- visible to every user via the global_or_user fallback.
+
+DEFINE FIELD owner ON notebook TYPE option<record<user>>;
+DEFINE INDEX idx_owner_notebook ON notebook FIELDS owner;
+DEFINE FIELD owner ON source TYPE option<record<user>>;
+DEFINE INDEX idx_owner_source ON source FIELDS owner;
+DEFINE FIELD owner ON note TYPE option<record<user>>;
+DEFINE INDEX idx_owner_note ON note FIELDS owner;
+DEFINE FIELD owner ON chat_session TYPE option<record<user>>;
+DEFINE INDEX idx_owner_chat_session ON chat_session FIELDS owner;
+DEFINE FIELD owner ON source_embedding TYPE option<record<user>>;
+DEFINE INDEX idx_owner_source_embedding ON source_embedding FIELDS owner;
+DEFINE FIELD owner ON source_insight TYPE option<record<user>>;
+DEFINE INDEX idx_owner_source_insight ON source_insight FIELDS owner;
+DEFINE FIELD owner ON episode TYPE option<record<user>>;
+DEFINE INDEX idx_owner_episode ON episode FIELDS owner;
+DEFINE FIELD owner ON artifact TYPE option<record<user>>;
+DEFINE INDEX idx_owner_artifact ON artifact FIELDS owner;
+DEFINE FIELD owner ON model TYPE option<record<user>>;
+DEFINE INDEX idx_owner_model ON model FIELDS owner;
+DEFINE FIELD owner ON credential TYPE option<record<user>>;
+DEFINE INDEX idx_owner_credential ON credential FIELDS owner;
+DEFINE FIELD owner ON transformation TYPE option<record<user>>;
+DEFINE INDEX idx_owner_transformation ON transformation FIELDS owner;
+DEFINE FIELD owner ON episode_profile TYPE option<record<user>>;
+DEFINE INDEX idx_owner_episode_profile ON episode_profile FIELDS owner;
+DEFINE FIELD owner ON speaker_profile TYPE option<record<user>>;
+DEFINE INDEX idx_owner_speaker_profile ON speaker_profile FIELDS owner;
+
+-- Both search functions gain a trailing optional $owner parameter. Callers
+-- pass NONE to run unscoped (worker context / no user bound), which matches
+-- the previous behaviour exactly. Every WHERE branch filters with
+-- `($owner IS NONE OR owner = $owner)`; branches above the final statement
+-- are otherwise reproduced verbatim from migration 26.
+
+REMOVE FUNCTION IF EXISTS fn::vector_search;
+
+DEFINE FUNCTION IF NOT EXISTS fn::vector_search($query: array<float>, $match_count: int, $sources: bool, $show_notes: bool, $min_similarity: float, $notebook_ids: option<array<record<notebook>>>, $owner: option<record<user>>) {
+
+    let $scoped = $notebook_ids != NONE AND array::len($notebook_ids) > 0;
+    let $scoped_sources = IF $scoped { (SELECT VALUE in FROM reference WHERE out IN $notebook_ids) } ELSE { [] };
+    let $scoped_notes = IF $scoped { (SELECT VALUE in FROM artifact WHERE out IN $notebook_ids) } ELSE { [] };
+
+    let $source_embedding_search =
+        IF $sources {(
+            SELECT
+                source.id as id,
+                source.title as title,
+                content,
+                source.id as parent_id,
+                vector::similarity::cosine(embedding, $query) as similarity
+            FROM source_embedding
+            WHERE embedding != none and array::len(embedding)=array::len($query) AND
+                 vector::similarity::cosine(embedding, $query) >= $min_similarity
+              AND (!$scoped OR source IN $scoped_sources)
+              AND ($owner IS NONE OR owner = $owner)
+            ORDER BY similarity DESC
+            LIMIT $match_count
+        )}
+        ELSE { [] };
+
+    let $source_insight_search =
+        IF $sources {(
+            SELECT
+                id,
+                insight_type + ' - ' + (source.title OR '') as title,
+                content,
+                source.id as parent_id,
+                vector::similarity::cosine(embedding, $query) as similarity
+            FROM source_insight
+             WHERE embedding != none and array::len(embedding)=array::len($query) AND
+            vector::similarity::cosine(embedding, $query) >= $min_similarity
+              AND (!$scoped OR source IN $scoped_sources)
+              AND ($owner IS NONE OR owner = $owner)
+            ORDER BY similarity DESC
+            LIMIT $match_count
+        )}
+        ELSE { [] };
+
+
+    let $note_content_search =
+        IF $show_notes {(
+            SELECT
+                id,
+                title,
+                content,
+                id as parent_id,
+                vector::similarity::cosine(embedding, $query) as similarity
+            FROM note
+            WHERE embedding != none and array::len(embedding)=array::len($query) AND
+            vector::similarity::cosine(embedding, $query) >= $min_similarity
+              AND (!$scoped OR id IN $scoped_notes)
+              AND ($owner IS NONE OR owner = $owner)
+            ORDER BY similarity DESC
+            LIMIT $match_count
+        )}
+        ELSE { [] };
+
+
+    let $all_results = array::union(
+        array::union($source_embedding_search, $source_insight_search),
+        $note_content_search
+    );
+
+
+    -- Group FIRST, then order and limit over the grouped set.
+    --
+    -- The previous form did all three in one SELECT. SurrealDB returns grouped
+    -- rows in group-key order, so the trailing ORDER BY had no effect and LIMIT
+    -- truncated an id-ordered list -- and `note:` sorts before `source:` and
+    -- `source_insight:`. Any $match_count below the number of embedded notes
+    -- therefore returned notes only, silently discarding sources that scored
+    -- higher than every note returned (#1431).
+    let $grouped = (SELECT id, parent_id, title, math::max(similarity) AS similarity,
+                           array::flatten(content) AS matches
+                    FROM $all_results
+                    WHERE id IS NOT NONE
+                    GROUP BY id, parent_id, title);
+
+    -- `id` breaks ties so equal similarities order deterministically, matching
+    -- the Python re-sort added in #1306.
+    RETURN (SELECT * FROM $grouped ORDER BY similarity DESC, id ASC LIMIT $match_count);
+
+};
+
+-- fn::text_search (last defined in migration 26) gains the same trailing
+-- optional $owner parameter. Every WHERE branch gains the owner filter; all
+-- other branches are reproduced verbatim from 26.
+
+REMOVE FUNCTION IF EXISTS fn::text_search;
+
+DEFINE FUNCTION IF NOT EXISTS fn::text_search($query_text: string, $match_count: int, $sources: bool, $show_notes: bool, $notebook_ids: option<array<record<notebook>>>, $owner: option<record<user>>) {
+
+    let $scoped = $notebook_ids != NONE AND array::len($notebook_ids) > 0;
+    let $scoped_sources = IF $scoped { (SELECT VALUE in FROM reference WHERE out IN $notebook_ids) } ELSE { [] };
+    let $scoped_notes = IF $scoped { (SELECT VALUE in FROM artifact WHERE out IN $notebook_ids) } ELSE { [] };
+
+    let $source_title_search =
+        IF $sources {(
+            SELECT id, title,
+            search::highlight('`', '`', 1) as content,
+            id as parent_id,
+            math::max(search::score(1)) AS relevance
+            FROM source
+            WHERE title @1@ $query_text
+              AND (!$scoped OR id IN $scoped_sources)
+              AND ($owner IS NONE OR owner = $owner)
+            GROUP BY id)}
+        ELSE { [] };
+
+    let $source_embedding_search =
+         IF $sources {(
+            SELECT source.id as id, source.title as title, search::highlight('`', '`', 1) as content, source.id as parent_id, math::max(search::score(1)) AS relevance
+            FROM source_embedding
+            WHERE content @1@ $query_text
+              AND (!$scoped OR source IN $scoped_sources)
+              AND ($owner IS NONE OR owner = $owner)
+            GROUP BY id)}
+        ELSE { [] };
+
+    let $source_full_search =
+         IF $sources {(
+            SELECT id, title, search::highlight('`', '`', 1) as content, id as parent_id, math::max(search::score(1)) AS relevance
+            FROM source
+            WHERE full_text @1@ $query_text
+              AND (!$scoped OR id IN $scoped_sources)
+              AND ($owner IS NONE OR owner = $owner)
+            GROUP BY id)}
+        ELSE { [] };
+
+    let $source_insight_search =
+         IF $sources {(
+             SELECT id, insight_type + " - " + (source.title OR '') as title, search::highlight('`', '`', 1) as content, source.id as parent_id,  math::max(search::score(1)) AS relevance
+            FROM source_insight
+            WHERE content @1@ $query_text
+              AND (!$scoped OR source IN $scoped_sources)
+              AND ($owner IS NONE OR owner = $owner)
+            GROUP BY id)}
+        ELSE { [] };
+
+    let $note_title_search =
+         IF $show_notes {(
+             SELECT id, title, search::highlight('`', '`', 1) as content,  id as parent_id, math::max(search::score(1)) AS relevance
+            FROM note
+            WHERE title @1@ $query_text
+              AND (!$scoped OR id IN $scoped_notes)
+              AND ($owner IS NONE OR owner = $owner)
+            GROUP BY id)}
+        ELSE { [] };
+
+     let $note_content_search =
+         IF $show_notes {(
+             SELECT id, title, search::highlight('`', '`', 1) as content,  id as parent_id, math::max(search::score(1)) AS relevance
+            FROM note
+            WHERE content @1@ $query_text
+              AND (!$scoped OR id IN $scoped_notes)
+              AND ($owner IS NONE OR owner = $owner)
+            GROUP BY id)}
+        ELSE { [] };
+
+    let $source_chunk_results = array::union($source_embedding_search, $source_full_search);
+
+    let $source_asset_results = array::union($source_title_search, $source_insight_search);
+
+    let $source_results = array::union($source_chunk_results, $source_asset_results );
+    let $note_results = array::union($note_title_search, $note_content_search );
+    let $final_results = array::union($source_results, $note_results );
+
+    -- Group FIRST, then order and limit over the grouped set, for the same
+    -- reason as fn::vector_search above (#1505). Unlike vector search, nothing
+    -- re-sorts these rows in Python, so the id-ordered result reached callers
+    -- as-is. The returned fields are unchanged.
+    let $grouped = (select id, parent_id, title, math::max(relevance) as relevance
+        from $final_results where id is not None
+        group by id, parent_id, title);
+
+    RETURN (SELECT * FROM $grouped ORDER BY relevance DESC, id ASC LIMIT $match_count);
+
+};

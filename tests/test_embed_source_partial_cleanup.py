@@ -19,6 +19,7 @@ OTHER_SOURCE_ID = "source:other"
 class _FakeSource:
     full_text = "some text " * 200
     asset = None
+    owner = None
 
 
 class _FakeEmbeddingTable:

@@ -19,10 +19,12 @@ from open_notebook.exceptions import (
 
 class Notebook(ObjectModel):
     table_name: ClassVar[str] = "notebook"
+    owned: ClassVar[bool] = True
     name: str
     description: str
     archived: Optional[bool] = False
     last_viewed_at: Optional[datetime] = None
+    owner: Optional[Union[str, RecordID]] = None
 
     @field_validator("name")
     @classmethod
@@ -326,7 +328,9 @@ class Asset(BaseModel):
 
 class SourceEmbedding(ObjectModel):
     table_name: ClassVar[str] = "source_embedding"
+    owned: ClassVar[bool] = True
     content: str
+    owner: Optional[Union[str, RecordID]] = None
 
     async def get_source(self) -> "Source":
         try:
@@ -345,8 +349,10 @@ class SourceEmbedding(ObjectModel):
 
 class SourceInsight(ObjectModel):
     table_name: ClassVar[str] = "source_insight"
+    owned: ClassVar[bool] = True
     insight_type: str
     content: str
+    owner: Optional[Union[str, RecordID]] = None
 
     @classmethod
     async def get_for_sources(
@@ -415,6 +421,9 @@ class Source(ObjectModel):
     command: Optional[Union[str, RecordID]] = Field(
         default=None, description="Link to surreal-commands processing job"
     )
+    owner: Optional[Union[str, RecordID]] = None
+
+    owned: ClassVar[bool] = True
 
     @field_validator("command", mode="before")
     @classmethod
@@ -690,9 +699,11 @@ class Source(ObjectModel):
 
 class Note(ObjectModel):
     table_name: ClassVar[str] = "note"
+    owned: ClassVar[bool] = True
     title: Optional[str] = None
     note_type: Optional[Literal["human", "ai"]] = None
     content: Optional[str] = None
+    owner: Optional[Union[str, RecordID]] = None
 
     @field_validator("content")
     @classmethod
@@ -757,13 +768,16 @@ class Note(ObjectModel):
 
 class ChatSession(ObjectModel):
     table_name: ClassVar[str] = "chat_session"
+    owned: ClassVar[bool] = True
     nullable_fields: ClassVar[set[str]] = {"model_override"}
     title: Optional[str] = None
     model_override: Optional[str] = None
+    owner: Optional[Union[str, RecordID]] = None
 
     async def relate_to_notebook(self, notebook_id: str) -> Any:
         if not notebook_id:
             raise InvalidInputError("Notebook ID must be provided")
+        await Notebook.get(notebook_id)  # raises NotFoundError if invalid/missing
         return await self.relate("refers_to", notebook_id)
 
     async def relate_to_source(self, source_id: str) -> Any:
@@ -802,8 +816,11 @@ async def resolve_notebook_scope(notebook_ids: List[str]) -> List[str]:
         raise InvalidInputError(f"Invalid notebook id(s): {', '.join(invalid)}")
 
     try:
+        owner_where, owner_params = Notebook._owner_scope()
+        owner_clause = f" AND {owner_where}" if owner_where else ""
         rows = await repo_query(
-            "SELECT id FROM notebook WHERE id IN $ids", {"ids": record_ids}
+            f"SELECT id FROM notebook WHERE id IN $ids{owner_clause}",
+            {**owner_params, "ids": record_ids},
         )
     except Exception as e:
         # Same contract as text_search / vector_search: log the raw driver
@@ -818,6 +835,19 @@ async def resolve_notebook_scope(notebook_ids: List[str]) -> List[str]:
     if missing:
         raise NotFoundError(f"Notebook(s) not found: {', '.join(missing)}")
     return notebook_ids
+
+
+def _search_owner() -> Optional[str]:
+    """Current user id for owner-scoped search, or None to search globally.
+
+    None (no user bound, e.g. workers) keeps the search functions usable from
+    background jobs that must see every user's content.
+    """
+    # Lazy import: current_user imports domain.user, which imports this module.
+    from open_notebook.utils.current_user import current_user
+
+    user = current_user.get()
+    return user.id if user is not None else None
 
 
 def _scope_record_ids(notebook_ids: Optional[List[str]]) -> Optional[List[RecordID]]:
@@ -844,7 +874,9 @@ async def text_search(
         search_results = await repo_query(
             """
             select *
-            from fn::text_search($keyword, $results, $source, $note, $notebook_ids)
+            from fn::text_search(
+                $keyword, $results, $source, $note, $notebook_ids, $owner
+            )
             """,
             {
                 "keyword": keyword,
@@ -852,6 +884,7 @@ async def text_search(
                 "source": source,
                 "note": note,
                 "notebook_ids": _scope_record_ids(notebook_ids),
+                "owner": _search_owner(),
             },
         )
         return search_results
@@ -902,7 +935,7 @@ async def vector_search(
         embed = await generate_embedding(keyword)
         search_results = await repo_query(
             """
-            SELECT * FROM fn::vector_search($embed, $results, $source, $note, $minimum_score, $notebook_ids);
+            SELECT * FROM fn::vector_search($embed, $results, $source, $note, $minimum_score, $notebook_ids, $owner);
             """,
             {
                 "embed": embed,
@@ -911,6 +944,7 @@ async def vector_search(
                 "note": note,
                 "minimum_score": minimum_score,
                 "notebook_ids": _scope_record_ids(notebook_ids),
+                "owner": _search_owner(),
             },
         )
         # SurrealDB fn::vector_search declares ORDER BY similarity DESC, but the

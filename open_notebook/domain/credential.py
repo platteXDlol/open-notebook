@@ -15,10 +15,11 @@ Usage:
     await cred.save()
 """
 
-from typing import Any, ClassVar, Dict, List, Optional
+from typing import Any, ClassVar, Dict, List, Optional, Union
 
 from loguru import logger
 from pydantic import SecretStr, model_validator
+from surrealdb import RecordID
 
 from open_notebook.database.repository import ensure_record_id, repo_query
 from open_notebook.domain.base import ObjectModel
@@ -53,6 +54,7 @@ class Credential(ObjectModel):
     # `credential` table (migration 15). Adding a new such option only requires
     # declaring the Pydantic field below and listing it here — no DB migration.
     CONFIG_EXTRAS: ClassVar[set[str]] = {"num_ctx"}
+    global_or_user: ClassVar[bool] = True
 
     name: str
     provider: str
@@ -81,6 +83,7 @@ class Credential(ObjectModel):
     # Exposed as a top-level field (and on the API) for convenience; it mirrors
     # config["num_ctx"].
     num_ctx: Optional[int] = None
+    owner: Optional[Union[str, RecordID]] = None
 
     @model_validator(mode="before")
     @classmethod
@@ -143,9 +146,11 @@ class Credential(ObjectModel):
     @classmethod
     async def get_by_provider(cls, provider: str) -> List["Credential"]:
         """Get all credentials for a provider."""
+        owner_where, owner_params = cls._owner_scope()
+        where_clause = f" AND {owner_where}" if owner_where else ""
         results = await repo_query(
-            "SELECT * FROM credential WHERE string::lowercase(provider) = string::lowercase($provider) ORDER BY created ASC",
-            {"provider": provider},
+            f"SELECT * FROM credential WHERE string::lowercase(provider) = string::lowercase($provider){where_clause} ORDER BY created ASC",
+            {**owner_params, "provider": provider},
         )
         credentials = []
         for row in results:
@@ -175,12 +180,14 @@ class Credential(ObjectModel):
     @classmethod
     async def get_all(cls, order_by=None) -> List["Credential"]:
         """Override get_all() to handle api_key decryption with per-row error handling."""
+        owner_where, owner_params = cls._owner_scope()
+        where_clause = f" WHERE {owner_where}" if owner_where else ""
         if order_by:
             validated_order_by = cls._validate_order_by(order_by)
-            query = f"SELECT * FROM {cls.table_name} ORDER BY {validated_order_by}"
+            query = f"SELECT * FROM {cls.table_name}{where_clause} ORDER BY {validated_order_by}"
         else:
-            query = f"SELECT * FROM {cls.table_name}"
-        results = await repo_query(query, {})
+            query = f"SELECT * FROM {cls.table_name}{where_clause}"
+        results = await repo_query(query, owner_params)
         credentials = []
         for row in results:
             try:

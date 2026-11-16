@@ -51,6 +51,7 @@ class EpisodeProfile(ObjectModel):
         "language",
         "max_tokens",
     }
+    global_or_user: ClassVar[bool] = True
 
     name: str = Field(..., description="Unique profile name")
     description: Optional[str] = Field(None, description="Profile description")
@@ -80,6 +81,7 @@ class EpisodeProfile(ObjectModel):
         None,
         description="Max output tokens for outline/transcript generation (passed through to podcast_creator)",
     )
+    owner: Optional[Union[str, RecordID]] = None
 
     @field_validator("num_segments")
     @classmethod
@@ -121,8 +123,11 @@ class EpisodeProfile(ObjectModel):
     @classmethod
     async def get_by_name(cls, name: str) -> Optional["EpisodeProfile"]:
         """Get episode profile by name"""
+        owner_where, owner_params = cls._owner_scope()
+        where_clause = f" AND {owner_where}" if owner_where else ""
         result = await repo_query(
-            "SELECT * FROM episode_profile WHERE name = $name", {"name": name}
+            f"SELECT * FROM episode_profile WHERE name = $name{where_clause}",
+            {**owner_params, "name": name},
         )
         if result:
             return cls(**result[0])
@@ -140,6 +145,7 @@ class SpeakerProfile(ObjectModel):
         "description",
         "voice_model",
     }
+    global_or_user: ClassVar[bool] = True
 
     name: str = Field(..., description="Unique profile name")
     description: Optional[str] = Field(None, description="Profile description")
@@ -150,6 +156,7 @@ class SpeakerProfile(ObjectModel):
     speakers: List[Dict[str, Any]] = Field(
         ..., description="Array of speaker configurations"
     )
+    owner: Optional[Union[str, RecordID]] = None
 
     @field_validator("speakers")
     @classmethod
@@ -187,8 +194,11 @@ class SpeakerProfile(ObjectModel):
     @classmethod
     async def get_by_name(cls, name: str) -> Optional["SpeakerProfile"]:
         """Get speaker profile by name"""
+        owner_where, owner_params = cls._owner_scope()
+        where_clause = f" AND {owner_where}" if owner_where else ""
         result = await repo_query(
-            "SELECT * FROM speaker_profile WHERE name = $name", {"name": name}
+            f"SELECT * FROM speaker_profile WHERE name = $name{where_clause}",
+            {**owner_params, "name": name},
         )
         if result:
             return cls(**result[0])
@@ -205,8 +215,11 @@ class SpeakerProfile(ObjectModel):
         """
         ref_str = str(ref)
         if ref_str.startswith(f"{cls.table_name}:"):
+            owner_where, owner_params = cls._owner_scope()
+            where_clause = f" WHERE {owner_where}" if owner_where else ""
             result = await repo_query(
-                "SELECT * FROM $id", {"id": ensure_record_id(ref_str)}
+                f"SELECT * FROM $id{where_clause}",
+                {**owner_params, "id": ensure_record_id(ref_str)},
             )
             if result:
                 return cls(**result[0])
@@ -218,6 +231,7 @@ class PodcastEpisode(ObjectModel):
     """Enhanced PodcastEpisode with job tracking and metadata"""
 
     table_name: ClassVar[str] = "episode"
+    owned: ClassVar[bool] = True
 
     name: str = Field(..., description="Episode name")
     episode_profile: Dict[str, Any] = Field(
@@ -246,6 +260,7 @@ class PodcastEpisode(ObjectModel):
     command: Optional[Union[str, RecordID]] = Field(
         default=None, description="Link to surreal-commands job"
     )
+    owner: Optional[Union[str, RecordID]] = None
 
     model_config = ConfigDict(arbitrary_types_allowed=True)
 

@@ -22,6 +22,7 @@ from open_notebook.exceptions import (
     NotFoundError,
 )
 from open_notebook.utils.chunking import ContentType, chunk_text, detect_content_type
+from open_notebook.utils.current_user import current_user
 from open_notebook.utils.embedding import generate_embedding, generate_embeddings
 
 # NOTE: `stop_on` below can never trigger in practice — each command catches
@@ -383,12 +384,14 @@ async def embed_source_command(input_data: EmbedSourceInput) -> EmbedSourceOutpu
             )
 
         # 6. Bulk INSERT source_embedding records
+        # Child records inherit the parent source's owner.
         records = [
             {
                 "source": ensure_record_id(input_data.source_id),
                 "order": idx,
                 "content": chunk,
                 "embedding": embedding,
+                "owner": source.owner,
             }
             for idx, (chunk, embedding) in enumerate(zip(chunks, embeddings))
         ]
@@ -461,19 +464,23 @@ async def create_insight_command(
             f"type={input_data.insight_type}"
         )
 
-        # 1. Create insight record in database
+        # 1. Create insight record in database (child inherits the parent
+        # source's owner)
+        source = await Source.get(input_data.source_id)
         result = await repo_query(
             """
             CREATE source_insight CONTENT {
                 "source": $source_id,
                 "insight_type": $insight_type,
-                "content": $content
+                "content": $content,
+                "owner": $owner
             };
             """,
             {
                 "source_id": ensure_record_id(input_data.source_id),
                 "insight_type": input_data.insight_type,
                 "content": input_data.content,
+                "owner": source.owner,
             },
         )
 
@@ -541,17 +548,24 @@ async def collect_items_for_rebuild(
     """
     items: Dict[str, List[str]] = {"sources": [], "notes": [], "insights": []}
 
+    # Workers (no user bound to the task) run unscoped; when a user is bound,
+    # scope to their rows.
+    user = current_user.get()
+    owner_where = "owner = $owner AND " if user else ""
+    owner_params = {"owner": user.id} if user else {}
+
     if include_sources:
         if mode == "existing":
             # Query sources with embeddings (via source_embedding table)
             result = await repo_query(
-                """
+                f"""
                 RETURN array::distinct(
                     SELECT VALUE source.id
                     FROM source_embedding
-                    WHERE embedding != none AND array::len(embedding) > 0
+                    WHERE {owner_where}embedding != none AND array::len(embedding) > 0
                 )
-                """
+                """,
+                owner_params,
             )
             # RETURN returns the array directly as the result (not nested)
             if result:
@@ -561,7 +575,8 @@ async def collect_items_for_rebuild(
         else:  # mode == "all"
             # Query all sources with non-empty content
             result = await repo_query(
-                "SELECT id FROM source WHERE full_text != none AND string::trim(full_text) != ''"
+                f"SELECT id FROM source WHERE {owner_where}full_text != none AND string::trim(full_text) != ''",
+                owner_params,
             )
             items["sources"] = [str(item["id"]) for item in result] if result else []
 
@@ -571,12 +586,14 @@ async def collect_items_for_rebuild(
         if mode == "existing":
             # Query notes with embeddings
             result = await repo_query(
-                "SELECT id FROM note WHERE embedding != none AND array::len(embedding) > 0"
+                f"SELECT id FROM note WHERE {owner_where}embedding != none AND array::len(embedding) > 0",
+                owner_params,
             )
         else:  # mode == "all"
             # Query all notes with non-empty content
             result = await repo_query(
-                "SELECT id FROM note WHERE content != none AND string::trim(content) != ''"
+                f"SELECT id FROM note WHERE {owner_where}content != none AND string::trim(content) != ''",
+                owner_params,
             )
 
         items["notes"] = [str(item["id"]) for item in result] if result else []
@@ -586,12 +603,14 @@ async def collect_items_for_rebuild(
         if mode == "existing":
             # Query insights with embeddings
             result = await repo_query(
-                "SELECT id FROM source_insight WHERE embedding != none AND array::len(embedding) > 0"
+                f"SELECT id FROM source_insight WHERE {owner_where}embedding != none AND array::len(embedding) > 0",
+                owner_params,
             )
         else:  # mode == "all"
             # Query all insights with non-empty content
             result = await repo_query(
-                "SELECT id FROM source_insight WHERE content != none AND string::trim(content) != ''"
+                f"SELECT id FROM source_insight WHERE {owner_where}content != none AND string::trim(content) != ''",
+                owner_params,
             )
 
         items["insights"] = [str(item["id"]) for item in result] if result else []

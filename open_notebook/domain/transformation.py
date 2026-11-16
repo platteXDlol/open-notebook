@@ -1,6 +1,7 @@
-from typing import Any, ClassVar, Dict, Optional
+from typing import Any, ClassVar, Dict, Optional, Union
 
 from pydantic import Field
+from surrealdb import RecordID
 
 from open_notebook.database.repository import ensure_record_id
 from open_notebook.domain.base import ObjectModel, RecordModel
@@ -9,12 +10,14 @@ from open_notebook.domain.base import ObjectModel, RecordModel
 class Transformation(ObjectModel):
     table_name: ClassVar[str] = "transformation"
     nullable_fields: ClassVar[set[str]] = {"model_id"}
+    global_or_user: ClassVar[bool] = True
     name: str
     title: str
     description: str
     prompt: str
     apply_default: bool
     model_id: Optional[str] = None
+    owner: Optional[Union[str, RecordID]] = None
 
     def _prepare_save_data(self) -> Dict[str, Any]:
         data = super()._prepare_save_data()
