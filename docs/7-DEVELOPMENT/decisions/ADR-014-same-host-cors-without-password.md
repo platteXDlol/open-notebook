@@ -31,3 +31,10 @@ The browser sets both `Origin` and `Host`, so a page on another site normally ca
 - A no-password install whose UI and API are served from different host names (for example behind a reverse proxy) now gets CORS errors. The fix is to set a password or list the UI origin in `CORS_ORIGINS`; the startup log and the CHANGELOG say so.
 - Any other page served from the same host name (another app on the same server) is also allowed. That host is already trusted with the network path to the API.
 - CORS limits what a page can read and which requests need a preflight. It is not authentication: it does not stop "simple" cross-site requests (for example a form POST) from being sent, and it does not cover DNS-rebinding attacks, where the attacker's host name resolves to the API. Pages served from the same host name on another port are allowed too. A password remains the real protection for anything beyond one person on their own machine.
+
+## Updated (multi-user slice 2)
+
+This decision's password branch no longer exists: `OPEN_NOTEBOOK_PASSWORD` was removed and authentication is always on through session accounts, so the same-host default now applies whenever `CORS_ORIGINS` is unset — there is no password condition left. Two consequences supersede the text above:
+
+- Because the `on_session` cookie (HttpOnly, `SameSite=Lax`) is the authentication mechanism, the same-host default and any explicitly listed `CORS_ORIGINS` now send `Access-Control-Allow-Credentials: true` for each reflected/allowed origin. `CORS_ORIGINS=*` still never sends it. Same-host origins are reflected one-to-one (they are not the wildcard), so the exposure stays limited to the host the browser reached.
+- "Without a password the instance is unprotected" is replaced by the setup gate: a fresh instance answers `409 {"detail": "setup_required"}` on every `/api/*` request until `POST /api/auth/setup` creates the first admin, and failed logins are rate-limited (10 failures per username+IP per 5 minutes → `429`).

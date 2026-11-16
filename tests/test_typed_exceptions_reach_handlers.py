@@ -20,7 +20,6 @@ guarantee is included at the bottom.
 from unittest.mock import AsyncMock, patch
 
 import pytest
-from fastapi.testclient import TestClient
 
 from open_notebook.exceptions import ConfigurationError, NotFoundError
 
@@ -28,10 +27,12 @@ CONFIG_ERROR_MESSAGE = "No default model configured. Set one in the Models secti
 
 
 @pytest.fixture
-def client():
+def client(api_session_test):
+    from conftest import authed_client
+
     from api.main import app
 
-    return TestClient(app, raise_server_exceptions=False)
+    return authed_client(app, raise_server_exceptions=False)
 
 
 def _boom(*_args, **_kwargs):

@@ -7,17 +7,18 @@ command-submission endpoint is gone.
 from unittest.mock import AsyncMock, patch
 
 import pytest
-from fastapi.testclient import TestClient
 
 from open_notebook.graphs import source as source_graph
 from open_notebook.graphs.source import content_process, validate_content_state
 
 
 @pytest.fixture
-def client():
+def client(api_session_test):
+    from conftest import authed_client
+
     from api.main import app
 
-    return TestClient(app, raise_server_exceptions=False)
+    return authed_client(app, raise_server_exceptions=False)
 
 
 @pytest.fixture

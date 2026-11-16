@@ -18,16 +18,17 @@ from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
-from fastapi.testclient import TestClient
 
 from open_notebook.exceptions import NotFoundError
 
 
 @pytest.fixture
-def client():
+def client(api_session_test):
+    from conftest import authed_client
+
     from api.main import app
 
-    return TestClient(app)
+    return authed_client(app)
 
 
 def _nf(*_args, **_kwargs):

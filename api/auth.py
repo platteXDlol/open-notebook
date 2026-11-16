@@ -1,27 +1,48 @@
-import secrets
+"""
+Session-based auth middleware for the Open Notebook API.
+
+Multi-user slice 2 (docs/plans/multi-user.md): every /api/* request is
+authenticated via the on_session cookie (HttpOnly, set by /api/auth/login
+and /api/auth/setup). A valid session sets `current_user` for the request.
+On a fresh instance (no user exists yet) every protected endpoint answers
+409 {"detail": "setup_required"} so the first admin can run /api/auth/setup.
+"""
+
 from typing import Optional
 
 from fastapi import Request
-from starlette.middleware.base import BaseHTTPMiddleware, RequestResponseEndpoint
+from loguru import logger
+from starlette.middleware.base import (
+    BaseHTTPMiddleware,
+    RequestResponseEndpoint,
+)
 from starlette.responses import JSONResponse, Response
 from starlette.types import ASGIApp
 
-from open_notebook.utils.encryption import get_secret_from_env
+from open_notebook.domain.user import Session, User
+from open_notebook.utils.current_user import current_user
+
+SESSION_COOKIE_NAME = "on_session"
+
+# /api paths the middleware must never block: status reports the setup
+# state, and login/setup are how you obtain a session.
+API_AUTH_EXEMPT_PATHS = ["/api/auth/status", "/api/auth/login", "/api/auth/setup"]
 
 
-class PasswordAuthMiddleware(BaseHTTPMiddleware):
-    """
-    Middleware to check password authentication for all API requests.
-    Auth is fully disabled (no hardcoded default password) if
-    OPEN_NOTEBOOK_PASSWORD is not set.
-    Supports Docker secrets via OPEN_NOTEBOOK_PASSWORD_FILE.
+class SessionAuthMiddleware(BaseHTTPMiddleware):
+    """Authenticate /api/* requests with the on_session cookie.
+
+    - Non-/api paths, excluded paths and OPTIONS (CORS preflight) pass through.
+    - A valid session sets `current_user` for the duration of the request
+      (also for the exempt auth endpoints, so /status can report the user).
+    - A missing/invalid session is rejected with 401, or 409
+      setup_required while no user exists yet.
     """
 
     def __init__(
         self, app: ASGIApp, excluded_paths: Optional[list[str]] = None
     ) -> None:
         super().__init__(app)
-        self.password = get_secret_from_env("OPEN_NOTEBOOK_PASSWORD")
         self.excluded_paths: list[str] = excluded_paths or [
             "/",
             "/health",
@@ -33,50 +54,45 @@ class PasswordAuthMiddleware(BaseHTTPMiddleware):
     async def dispatch(
         self, request: Request, call_next: RequestResponseEndpoint
     ) -> Response:
-        # Skip authentication if no password is set
-        if not self.password:
-            return await call_next(request)
+        path = request.url.path
 
-        # Skip authentication for excluded paths
-        if request.url.path in self.excluded_paths:
-            return await call_next(request)
-
-        # Skip authentication for CORS preflight requests (OPTIONS)
-        if request.method == "OPTIONS":
-            return await call_next(request)
-
-        # Check authorization header
-        auth_header = request.headers.get("Authorization")
-
-        if not auth_header:
-            return JSONResponse(
-                status_code=401,
-                content={"detail": "Missing authorization header"},
-                headers={"WWW-Authenticate": "Bearer"},
-            )
-
-        # Expected format: "Bearer {password}"
-        try:
-            scheme, credentials = auth_header.split(" ", 1)
-            if scheme.lower() != "bearer":
-                raise ValueError("Invalid authentication scheme")
-        except ValueError:
-            return JSONResponse(
-                status_code=401,
-                content={"detail": "Invalid authorization header format"},
-                headers={"WWW-Authenticate": "Bearer"},
-            )
-
-        # Check password (constant-time to avoid a timing side-channel)
-        if not secrets.compare_digest(
-            credentials.encode("latin-1"), self.password.encode("utf-8")
+        if (
+            path in self.excluded_paths
+            or request.method == "OPTIONS"
+            or not path.startswith("/api")
         ):
+            return await call_next(request)
+
+        user: Optional[User] = None
+        raw_token = request.cookies.get(SESSION_COOKIE_NAME)
+        if raw_token:
+            try:
+                user = await Session.resolve(raw_token)
+            except Exception as e:
+                # A session-table failure must not take down unauthenticated
+                # endpoints (e.g. /api/auth/status on a broken DB); treat the
+                # cookie as invalid.
+                logger.warning(f"Session resolution failed: {e}")
+                user = None
+
+        if user is None and path not in API_AUTH_EXEMPT_PATHS:
+            try:
+                has_users = await User.any_exists()
+            except Exception:
+                # Fail closed: if we cannot tell whether the instance is
+                # set up, require authentication instead of opening it up.
+                logger.warning("Could not check for existing users; requiring auth")
+                has_users = True
+            if not has_users:
+                return JSONResponse(
+                    status_code=409, content={"detail": "setup_required"}
+                )
             return JSONResponse(
-                status_code=401,
-                content={"detail": "Invalid password"},
-                headers={"WWW-Authenticate": "Bearer"},
+                status_code=401, content={"detail": "Authentication required"}
             )
 
-        # Password is correct, proceed with the request
-        response = await call_next(request)
-        return response
+        token = current_user.set(user)
+        try:
+            return await call_next(request)
+        finally:
+            current_user.reset(token)

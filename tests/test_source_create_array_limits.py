@@ -71,12 +71,12 @@ class TestFormParsingReturns422:
     """
 
     @pytest.fixture
-    def client(self):
-        from fastapi.testclient import TestClient
+    def client(self, api_session_test):
+        from conftest import authed_client
 
         from api.main import app
 
-        return TestClient(app)
+        return authed_client(app)
 
     def test_51_notebooks_via_form_returns_422(self, client):
         import json as _json

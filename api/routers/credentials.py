@@ -507,11 +507,9 @@ async def migrate_from_provider_config():
 async def migrate_encryption():
     """Re-encrypt stored API keys into the versioned PBKDF2 format.
 
-    Inherits the global password auth with no exemption: when
-    OPEN_NOTEBOOK_PASSWORD is unset, auth is disabled instance-wide and
-    this endpoint is reachable by anyone with network access, exactly like
-    the other migration endpoints. Set a password before running the pass
-    on a shared network.
+    Requires a valid session like every other endpoint (no exemption). On a
+    fresh instance it answers 409 setup_required until /api/auth/setup has
+    created the first admin.
     """
     try:
         return await svc_migrate_encryption_scheme()

@@ -13,7 +13,6 @@ from pathlib import Path
 from unittest.mock import AsyncMock, patch
 
 import pytest
-from fastapi.testclient import TestClient
 
 from open_notebook.config import PODCASTS_FOLDER
 from open_notebook.podcasts.audio_paths import resolve_contained_audio_path
@@ -36,10 +35,12 @@ def make_episode(audio_file=None, **overrides):
 
 
 @pytest.fixture
-def client():
+def client(api_session_test):
+    from conftest import authed_client
+
     from api.main import app
 
-    return TestClient(app)
+    return authed_client(app)
 
 
 class TestResolveContainedAudioPath:

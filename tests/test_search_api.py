@@ -2,17 +2,18 @@ from pathlib import Path
 from unittest.mock import AsyncMock, patch
 
 import pytest
-from fastapi.testclient import TestClient
 
 MIGRATIONS_DIR = Path("open_notebook/database/migrations")
 
 
 @pytest.fixture
-def client():
+def client(api_session_test):
     """Create test client after environment variables have been cleared by conftest."""
+    from conftest import authed_client
+
     from api.main import app
 
-    return TestClient(app)
+    return authed_client(app)
 
 
 class TestSearchLimitValidation:

@@ -20,16 +20,17 @@ Source.vectorize()) - so it now explicitly checks for a submission failure
 from unittest.mock import AsyncMock, patch
 
 import pytest
-from fastapi.testclient import TestClient
 
 from open_notebook.domain.notebook import Note
 
 
 @pytest.fixture
-def client():
+def client(api_session_test):
+    from conftest import authed_client
+
     from api.main import app
 
-    return TestClient(app)
+    return authed_client(app)
 
 
 class TestNoteSaveEmbedResilience:

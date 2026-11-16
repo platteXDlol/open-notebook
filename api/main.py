@@ -19,7 +19,7 @@ from fastapi.responses import JSONResponse
 from loguru import logger
 from starlette.exceptions import HTTPException as StarletteHTTPException
 
-from api.auth import PasswordAuthMiddleware
+from api.auth import SessionAuthMiddleware
 from api.cors import (
     LOCALHOST_ORIGIN_REGEX,
     SameHostCORSMiddleware,
@@ -48,6 +48,7 @@ from api.routers import (
     sources,
     speaker_profiles,
     transformations,
+    users,
 )
 from api.routers import commands as commands_router
 from open_notebook.database.async_migrate import AsyncMigrationManager
@@ -73,38 +74,36 @@ def _parse_cors_origins(raw: str) -> list[str]:
     return [origin.strip() for origin in value.split(",") if origin.strip()]
 
 
-def _uses_same_host_cors(cors_origins_raw: str | None, password_set: bool) -> bool:
+def _uses_same_host_cors(cors_origins_raw: str | None) -> bool:
     """Whether the default CORS policy is limited to localhost and same-host origins.
 
-    Without a password the API has no authentication, so the default wildcard
-    would let any web page the user visits call it through their browser and
-    read the answers. In that case, and only while CORS_ORIGINS is unset (or
-    blank), the default admits browser origins on this machine and origins on
-    the same host the browser used to reach the API, which is where the UI
-    lives. An explicit CORS_ORIGINS (including "*") is the operator's choice
-    and is kept.
+    The API authenticates every request with a session cookie, so an
+    unscoped wildcard CORS policy would let any web page the user visits
+    call it through their browser - with their session cookie attached - and
+    read the answers. While CORS_ORIGINS is unset (or blank), the default
+    admits only browser origins on this machine and origins on the same host
+    the browser used to reach the API, which is where the UI lives.
+    An explicit CORS_ORIGINS (including "*") is the operator's choice and is
+    kept.
     """
-    return not (cors_origins_raw or "").strip() and not password_set
+    return not (cors_origins_raw or "").strip()
 
 
-# Parsed once at module load; CORS_ORIGINS and OPEN_NOTEBOOK_PASSWORD changes
-# require a restart. A blank CORS_ORIGINS counts as unset.
+# Parsed once at module load; CORS_ORIGINS changes require a restart.
+# A blank CORS_ORIGINS counts as unset.
 _cors_origins_raw = (os.getenv("CORS_ORIGINS") or "").strip() or None
-CORS_SAME_HOST_ONLY = _uses_same_host_cors(
-    _cors_origins_raw, bool(get_secret_from_env("OPEN_NOTEBOOK_PASSWORD"))
-)
+CORS_SAME_HOST_ONLY = _uses_same_host_cors(_cors_origins_raw)
 CORS_ALLOWED_ORIGINS = (
     [] if CORS_SAME_HOST_ONLY else _parse_cors_origins(_cors_origins_raw or "*")
 )
 CORS_ALLOWED_ORIGIN_REGEX = LOCALHOST_ORIGIN_REGEX if CORS_SAME_HOST_ONLY else None
-CORS_IS_DEFAULT_WILDCARD = _cors_origins_raw is None and not CORS_SAME_HOST_ONLY
-# Keyed on the parsed list, not on whether the env var was set: an operator
-# who explicitly sets CORS_ORIGINS=* must get the same wildcard treatment as
-# the default, or credentials would combine with a wildcard origin - the
-# exact reflect-any-Origin behavior this flag exists to prevent. The
-# same-host default doesn't grant credentials either: the frontend never
-# sends credentialed requests, so there is nothing to allow.
-CORS_ALLOW_CREDENTIALS = "*" not in CORS_ALLOWED_ORIGINS and not CORS_SAME_HOST_ONLY
+# Keyed on the parsed list: an operator who explicitly sets CORS_ORIGINS=*
+# gets a wildcard policy, and credentials are never combined with a wildcard
+# origin - that would reflect any Origin in Access-Control-Allow-Origin with
+# cookies attached. Session cookies are the auth mechanism, so credentials
+# are allowed for every non-wildcard policy (including the same-host default,
+# which is where the cross-port UI lives).
+CORS_ALLOW_CREDENTIALS = "*" not in CORS_ALLOWED_ORIGINS
 
 # Parsed once at module load; OPEN_NOTEBOOK_MAX_UPLOAD_SIZE_MB changes require a restart.
 MAX_UPLOAD_SIZE_BYTES = get_max_upload_size_bytes()
@@ -231,17 +230,6 @@ async def lifespan(app: FastAPI):
             "Set OPEN_NOTEBOOK_ENCRYPTION_KEY to any secret string."
         )
 
-    # Security check: Password. Auth is off without it, which is fine on your
-    # own machine but not on anything reachable from a network.
-    if not get_secret_from_env("OPEN_NOTEBOOK_PASSWORD"):
-        logger.warning(
-            "OPEN_NOTEBOOK_PASSWORD not set. Authentication is disabled: anyone "
-            "who can reach the API or the UI can use the app and its stored "
-            "provider keys. Set OPEN_NOTEBOOK_PASSWORD for any deployment "
-            "reachable from another machine, or bind the published ports to "
-            "127.0.0.1."
-        )
-
     # Run database migrations
 
     try:
@@ -269,39 +257,32 @@ app = FastAPI(
 
 if CORS_SAME_HOST_ONLY:
     logger.warning(
-        "OPEN_NOTEBOOK_PASSWORD and CORS_ORIGINS are not set — the API accepts "
-        "browser cross-origin requests only from localhost and from pages on "
-        "the same host the API is reached at. If the UI and the API are served "
-        "from different host names (for example behind a reverse proxy), set "
-        "OPEN_NOTEBOOK_PASSWORD or list the UI origin in CORS_ORIGINS."
+        "CORS_ORIGINS is not set — the API accepts browser cross-origin "
+        "requests only from localhost and from pages on the same host the API "
+        "is reached at. If the UI and the API are served from different host "
+        "names (for example behind a reverse proxy), list the UI origin in "
+        "CORS_ORIGINS."
     )
-elif CORS_IS_DEFAULT_WILDCARD:
+elif CORS_ALLOWED_ORIGINS == ["*"]:
     logger.warning(
-        "CORS_ORIGINS is not set — API accepts cross-origin requests from any "
-        "origin (default: '*'). For production deployments, set CORS_ORIGINS to "
-        "your frontend origin(s), e.g. "
+        "CORS_ORIGINS is set to '*' — the API accepts cross-origin requests "
+        "from any origin. For production deployments, set CORS_ORIGINS to your "
+        "frontend origin(s), e.g. "
         "CORS_ORIGINS=https://notebook.example.com"
     )
 else:
     logger.info(f"CORS allowed origins: {CORS_ALLOWED_ORIGINS}")
 
-# Add password authentication middleware first
-# Exclude /api/auth/status and /api/config from authentication
+# Add session authentication middleware first: every /api/* request needs a
+# valid on_session cookie, except the setup/login/status endpoints (and on a
+# fresh instance, until /api/auth/setup has run).
 app.add_middleware(
-    PasswordAuthMiddleware,
-    excluded_paths=[
-        "/",
-        "/health",
-        "/docs",
-        "/openapi.json",
-        "/redoc",
-        "/api/auth/status",
-        "/api/config",
-    ],
+    SessionAuthMiddleware,
+    excluded_paths=["/", "/health", "/docs", "/openapi.json", "/redoc"],
 )
 
 # Reject oversized request bodies before they reach auth or routing - added
-# after PasswordAuthMiddleware (so it wraps around it) so a too-large request
+# after SessionAuthMiddleware (so it wraps around it) so a too-large request
 # is rejected before spending any work checking credentials.
 logger.info(
     f"Max request body size: {MAX_UPLOAD_SIZE_BYTES / (1024 * 1024):g}MB "
@@ -316,11 +297,9 @@ app.add_middleware(MaxBodySizeMiddleware, max_body_size=MAX_UPLOAD_SIZE_BYTES)
 # origins: combining allow_origins=["*"] with allow_credentials=True makes
 # Starlette reflect the request's Origin header verbatim (browsers reject a
 # literal "*" alongside credentials), which defeats the origin allowlist.
-# The frontend never sends credentialed requests (withCredentials: false)
-# and auth is a Bearer header, not a cookie, so this isn't independently
-# exploitable today - but there's no reason to allow it for any wildcard
-# case. Once an operator explicitly scopes CORS_ORIGINS to real origins,
-# credentialed cross-origin requests to those origins are safe to allow.
+# Session cookies are the auth mechanism, so credentials are allowed for
+# every non-wildcard policy (including the same-host default) and never for
+# a wildcard.
 app.add_middleware(
     SameHostCORSMiddleware,
     allow_same_host=CORS_SAME_HOST_ONLY,
@@ -436,6 +415,7 @@ async def open_notebook_error_handler(request: Request, exc: OpenNotebookError):
 
 # Include routers
 app.include_router(auth.router, prefix="/api", tags=["auth"])
+app.include_router(users.router, prefix="/api", tags=["users"])
 app.include_router(config.router, prefix="/api", tags=["config"])
 app.include_router(notebooks.router, prefix="/api", tags=["notebooks"])
 app.include_router(search.router, prefix="/api", tags=["search"])

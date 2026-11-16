@@ -303,13 +303,13 @@ async def test_pass_requires_encryption_key(patch_repo, monkeypatch):
 
 
 @pytest.fixture()
-def client():
+def client(api_session_test):
     """Test client mirroring tests/test_credentials_api.py."""
-    from fastapi.testclient import TestClient
+    from conftest import authed_client
 
     from api.main import app
 
-    return TestClient(app)
+    return authed_client(app)
 
 
 @pytest.mark.asyncio
