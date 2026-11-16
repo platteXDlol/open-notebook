@@ -35,6 +35,10 @@ _LOGIN_MAX_FAILURES = 10
 _LOGIN_WINDOW_SECONDS = 300
 _login_failures: Dict[Tuple[str, str], Deque[float]] = defaultdict(deque)
 
+# Timing equalizer: verified when the username doesn't exist, so the
+# unknown-user path costs the same scrypt as the wrong-password path.
+_DUMMY_PASSWORD_HASH = hash_password("dummy")
+
 
 def _client_ip(request: Request) -> str:
     return request.client.host if request.client else "unknown"
@@ -113,10 +117,13 @@ async def login(
     body: AuthRequest, request: Request, response: Response
 ) -> UserResponse:
     """Exchange username + password for a session cookie."""
-    key = (body.username.lower(), _client_ip(request))
+    username = body.username.lower()
+    key = (username, _client_ip(request))
     _check_login_rate_limit(key)
-    user = await User.get_by_username(body.username)
-    if user is None or not verify_password(body.password, user.password_hash):
+    user = await User.get_by_username(username)
+    password_hash = user.password_hash if user is not None else _DUMMY_PASSWORD_HASH
+    password_ok = verify_password(body.password, password_hash)
+    if user is None or not password_ok:
         _record_login_failure(key)
         raise AuthenticationError("Invalid username or password")
     _clear_login_failures(key)

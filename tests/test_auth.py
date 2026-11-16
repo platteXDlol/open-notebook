@@ -6,7 +6,7 @@ sets `current_user`. Fresh instances (no user exists) get 409
 has created the first admin.
 """
 
-from unittest.mock import AsyncMock
+from unittest.mock import AsyncMock, Mock
 
 import pytest
 from fastapi.testclient import TestClient
@@ -164,6 +164,20 @@ class TestAuthLogin:
             "/api/auth/login", json={"username": "ghost", "password": "x"}
         )
         assert response.status_code == 401
+
+    def test_login_unknown_user_still_verifies_password(self, monkeypatch, client):
+        """Unknown-username login must run a real scrypt verification (timing equalizer)."""
+        monkeypatch.setattr(User, "get_by_username", AsyncMock(return_value=None))
+        verify = Mock(return_value=False)
+        monkeypatch.setattr(auth_router, "verify_password", verify)
+
+        response = client.post(
+            "/api/auth/login", json={"username": "ghost", "password": "x"}
+        )
+
+        assert response.status_code == 401
+        verify.assert_called_once()
+        assert str(verify.call_args[0][1]).startswith("scrypt$")
 
 
 class TestLoginRateLimit:
