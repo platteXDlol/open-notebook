@@ -211,7 +211,6 @@ class ObjectModel(BaseModel):
             if self.id is None:
                 data["created"] = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
                 self._apply_owner_on_create(data)
-                repo_result = await repo_create(self.__class__.table_name, data)
             else:
                 data["created"] = (
                     self.created.strftime("%Y-%m-%d %H:%M:%S")
@@ -219,17 +218,21 @@ class ObjectModel(BaseModel):
                     else self.created
                 )
                 logger.debug(f"Updating record with id {self.id}")
-                repo_result = await repo_update(
-                    self.__class__.table_name, self.id, data
-                )
             # owner is a record<user> field; the SDK does not coerce
             # "user:xxx" strings on write (insert/merge fail), so hand the
-            # DB a RecordID. Covers created stamps, updated rows, and
-            # job-set owners inherited from the parent record.
+            # DB a RecordID BEFORE the create/update call. Covers created
+            # stamps, updated rows, and job-set owners inherited from the
+            # parent record.
             if (self.__class__.owned or self.__class__.global_or_user) and data.get(
                 "owner"
             ):
                 data["owner"] = ensure_record_id(data["owner"])
+            if self.id is None:
+                repo_result = await repo_create(self.__class__.table_name, data)
+            else:
+                repo_result = await repo_update(
+                    self.__class__.table_name, self.id, data
+                )
             # Update the current instance with the result
             # repo_result is a list of dictionaries
             result_list: List[Dict[str, Any]] = (

@@ -81,7 +81,7 @@ async def test_owned_get_foreign_row_raises_not_found():
         _reset_user(token)
     query, params = fake.calls[0]
     assert "owner = $owner" in query
-    assert params["owner"] == TEST_USER_B.id
+    assert params["owner"] == RecordID.parse(TEST_USER_B.id)
 
 
 @pytest.mark.asyncio
@@ -278,7 +278,7 @@ async def test_resolve_notebook_scope_filters_foreign_notebooks():
         _reset_user(token)
     query, params = fake.calls[0]
     assert "owner = $owner" in query
-    assert params["owner"] == TEST_USER_B.id
+    assert params["owner"] == RecordID.parse(TEST_USER_B.id)
 
 
 # ---------------------------------------------------------------------------
@@ -374,7 +374,7 @@ async def test_collect_items_scoped_to_current_user():
     assert len(fake.calls) == 3
     for query, params in fake.calls:
         assert "owner = $owner" in query
-        assert params["owner"] == TEST_ADMIN_USER.id
+        assert params["owner"] == RecordID.parse(TEST_ADMIN_USER.id)
 
 
 @pytest.mark.asyncio
@@ -443,7 +443,7 @@ async def test_user_b_cannot_fetch_admin_notebook(two_user_session):
     async def fake_query(query, params=None):
         calls.append((query, params or {}))
         # "The database": only rows matching the requested owner exist.
-        if str((params or {}).get("owner")) == TEST_USER_B.id:
+        if (params or {}).get("owner") == RecordID.parse(TEST_USER_B.id):
             return []
         return [dict(admin_row)]
 
@@ -473,4 +473,4 @@ async def test_user_b_notebook_list_scoped(two_user_session):
     assert response.status_code == 200
     query, params = fake.calls[0]
     assert "owner = $owner" in query
-    assert params["owner"] == TEST_USER_B.id
+    assert params["owner"] == RecordID.parse(TEST_USER_B.id)
