@@ -17,6 +17,7 @@ from pydantic import BaseModel
 
 from api.auth import SESSION_COOKIE_NAME
 from api.models import AuthRequest, PasswordChangeRequest, UserResponse
+from open_notebook.database.repository import ensure_record_id, repo_query
 from open_notebook.domain.user import (
     SESSION_TTL,
     Session,
@@ -106,6 +107,27 @@ async def setup_first_admin(
     if await User.any_exists():
         raise HTTPException(status_code=409, detail="Setup already completed")
     user = await User.create(body.username, body.password, role="admin")
+    # Adopt pre-existing content (legacy rows carry no owner) so the new
+    # admin keeps full access under owner-scoped queries. Content tables
+    # only — model/credential/transformation/profiles stay global.
+    for table in (
+        "notebook",
+        "source",
+        "note",
+        "chat_session",
+        "source_embedding",
+        "source_insight",
+        "episode",
+        "artifact",
+    ):
+        try:
+            await repo_query(
+                f"UPDATE {table} SET owner = $admin WHERE owner = NONE",
+                # $admin is a record<user> value; strings fail on write.
+                {"admin": ensure_record_id(user.id) if user.id else None},
+            )
+        except Exception as e:
+            logger.warning(f"Ownership backfill for {table} failed: {e}")
     token = await Session.create(user)
     _set_session_cookie(request, response, token)
     logger.info(f"First admin account '{user.username}' created via setup")

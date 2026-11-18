@@ -87,15 +87,17 @@ async def get_notebooks(
             raise invalid
 
         # Build the query with counts
+        owner_where, owner_params = Notebook._owner_scope()
+        owner_clause = f" WHERE {owner_where}" if owner_where else ""
         query = f"""
             SELECT *,
             count(<-reference.in) as source_count,
             count(<-artifact.in) as note_count
-            FROM notebook
+            FROM notebook{owner_clause}
             ORDER BY {validated_order_by}
         """
 
-        result = await repo_query(query)
+        result = await repo_query(query, owner_params)
 
         # Filter by archived status if specified
         if archived is not None:
@@ -164,25 +166,29 @@ async def get_recently_viewed(
 ):
     """Get recently viewed notebooks and sources, newest first."""
     try:
+        nb_where, nb_params = Notebook._owner_scope()
+        nb_clause = f" AND {nb_where}" if nb_where else ""
         notebooks = await repo_query(
-            """
+            f"""
             SELECT id, name AS title, last_viewed_at
             FROM notebook
-            WHERE last_viewed_at != NONE AND last_viewed_at != NULL
+            WHERE last_viewed_at != NONE AND last_viewed_at != NULL{nb_clause}
             ORDER BY last_viewed_at DESC
             LIMIT $limit
             """,
-            {"limit": limit},
+            {**nb_params, "limit": limit},
         )
+        src_where, src_params = Source._owner_scope()
+        src_clause = f" AND {src_where}" if src_where else ""
         sources = await repo_query(
-            """
+            f"""
             SELECT id, title, last_viewed_at
             FROM source
-            WHERE last_viewed_at != NONE AND last_viewed_at != NULL
+            WHERE last_viewed_at != NONE AND last_viewed_at != NULL{src_clause}
             ORDER BY last_viewed_at DESC
             LIMIT $limit
             """,
-            {"limit": limit},
+            {**src_params, "limit": limit},
         )
 
         items = [
@@ -240,13 +246,17 @@ async def get_notebook(notebook_id: str):
     """Get a specific notebook by ID."""
     try:
         # Query with counts for single notebook
-        query = """
+        owner_where, owner_params = Notebook._owner_scope()
+        owner_clause = f" WHERE {owner_where}" if owner_where else ""
+        query = f"""
             SELECT *,
             count(<-reference.in) as source_count,
             count(<-artifact.in) as note_count
-            FROM $notebook_id
+            FROM $notebook_id{owner_clause}
         """
-        result = await repo_query(query, {"notebook_id": ensure_record_id(notebook_id)})
+        result = await repo_query(
+            query, {**owner_params, "notebook_id": ensure_record_id(notebook_id)}
+        )
 
         if not result:
             raise HTTPException(status_code=404, detail="Notebook not found")
@@ -294,13 +304,17 @@ async def update_notebook(notebook_id: str, notebook_update: NotebookUpdate):
         await notebook.save()
 
         # Query with counts after update
-        query = """
+        owner_where, owner_params = Notebook._owner_scope()
+        owner_clause = f" WHERE {owner_where}" if owner_where else ""
+        query = f"""
             SELECT *,
             count(<-reference.in) as source_count,
             count(<-artifact.in) as note_count
-            FROM $notebook_id
+            FROM $notebook_id{owner_clause}
         """
-        result = await repo_query(query, {"notebook_id": ensure_record_id(notebook_id)})
+        result = await repo_query(
+            query, {**owner_params, "notebook_id": ensure_record_id(notebook_id)}
+        )
 
         if result:
             nb = result[0]

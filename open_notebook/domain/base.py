@@ -33,6 +33,11 @@ class ObjectModel(BaseModel):
     id: Optional[str] = None
     table_name: ClassVar[str] = ""
     nullable_fields: ClassVar[set[str]] = set()  # Fields that can be saved as None
+    # Ownership policy (slice 3 of docs/plans/multi-user.md):
+    #   owned          -> per-user rows; queries filter `owner = $owner`
+    #   global_or_user -> global rows (owner NONE) stay visible to every user
+    owned: ClassVar[bool] = False
+    global_or_user: ClassVar[bool] = False
     created: Optional[datetime] = None
     updated: Optional[datetime] = None
 
@@ -71,6 +76,34 @@ class ObjectModel(BaseModel):
         return ", ".join(validated_clauses)
 
     @classmethod
+    def _owner_scope(cls) -> tuple[Optional[str], Dict[str, Any]]:
+        """Owner WHERE fragment and params for the current user, if any.
+
+        Returns (None, {}) when the class has no owner policy or no user is
+        bound to the current task (workers, tests) so shared code paths keep
+        working unscoped.
+        """
+        if not (cls.owned or cls.global_or_user):
+            return None, {}
+        # Lazy import: current_user imports domain.user, which imports base.
+        from open_notebook.utils.current_user import current_user
+
+        user = current_user.get()
+        if user is None:
+            return None, {}
+        # owner is a record<user> field: the SDK does not coerce "user:xxx"
+        # strings, and WHERE owner = $owner with a string param silently
+        # matches nothing, so always bind a RecordID.
+        user_id = user.id
+        if user_id is None:
+            return None, {}
+        owner_id = ensure_record_id(user_id)
+        if cls.global_or_user:
+            # Global rows (owner NONE) stay visible to every user.
+            return "owner = $owner OR owner = NONE", {"owner": owner_id}
+        return "owner = $owner", {"owner": owner_id}
+
+    @classmethod
     async def get_all(cls: Type[T], order_by=None) -> List[T]:
         try:
             # If called from a specific subclass, use its table_name
@@ -82,13 +115,18 @@ class ObjectModel(BaseModel):
                 raise InvalidInputError(
                     "get_all() must be called from a specific model class"
                 )
+            owner_where, owner_params = cls._owner_scope()
+            where_clause = f" WHERE {owner_where}" if owner_where else ""
             if order_by:
                 validated_order_by = cls._validate_order_by(order_by)
-                query = f"SELECT * FROM {table_name} ORDER BY {validated_order_by}"
+                query = (
+                    f"SELECT * FROM {table_name}{where_clause} "
+                    f"ORDER BY {validated_order_by}"
+                )
             else:
-                query = f"SELECT * FROM {table_name}"
+                query = f"SELECT * FROM {table_name}{where_clause}"
 
-            result = await repo_query(query)
+            result = await repo_query(query, owner_params)
             objects = []
             for obj in result:
                 try:
@@ -120,7 +158,12 @@ class ObjectModel(BaseModel):
                     raise InvalidInputError(f"No class found for table {table_name}")
                 target_class = cast(Type[T], found_class)
 
-            result = await repo_query("SELECT * FROM $id", {"id": ensure_record_id(id)})
+            owner_where, owner_params = cls._owner_scope()
+            where_clause = f" WHERE {owner_where}" if owner_where else ""
+            result = await repo_query(
+                f"SELECT * FROM $id{where_clause}",
+                {**owner_params, "id": ensure_record_id(id)},
+            )
             if result:
                 return target_class(**result[0])
             else:
@@ -167,7 +210,7 @@ class ObjectModel(BaseModel):
             repo_result: Union[List[Dict[str, Any]], Dict[str, Any]]
             if self.id is None:
                 data["created"] = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-                repo_result = await repo_create(self.__class__.table_name, data)
+                self._apply_owner_on_create(data)
             else:
                 data["created"] = (
                     self.created.strftime("%Y-%m-%d %H:%M:%S")
@@ -175,6 +218,18 @@ class ObjectModel(BaseModel):
                     else self.created
                 )
                 logger.debug(f"Updating record with id {self.id}")
+            # owner is a record<user> field; the SDK does not coerce
+            # "user:xxx" strings on write (insert/merge fail), so hand the
+            # DB a RecordID BEFORE the create/update call. Covers created
+            # stamps, updated rows, and job-set owners inherited from the
+            # parent record.
+            if (self.__class__.owned or self.__class__.global_or_user) and data.get(
+                "owner"
+            ):
+                data["owner"] = ensure_record_id(data["owner"])
+            if self.id is None:
+                repo_result = await repo_create(self.__class__.table_name, data)
+            else:
                 repo_result = await repo_update(
                     self.__class__.table_name, self.id, data
                 )
@@ -199,6 +254,23 @@ class ObjectModel(BaseModel):
         except Exception as e:
             logger.error(f"Error saving record: {e}")
             raise DatabaseOperationError(e)
+
+    def _apply_owner_on_create(self, data: Dict[str, Any]) -> None:
+        """Stamp the creating user as owner on new records (create only).
+
+        An explicit owner (set by job code inheriting the parent's owner)
+        wins over the context user.
+        """
+        if not (self.__class__.owned or self.__class__.global_or_user):
+            return
+        if data.get("owner"):
+            return
+        # Lazy import: current_user imports domain.user, which imports base.
+        from open_notebook.utils.current_user import current_user
+
+        user = current_user.get()
+        if user is not None:
+            data["owner"] = user.id
 
     def _prepare_save_data(self) -> Dict[str, Any]:
         data = self.model_dump()

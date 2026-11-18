@@ -1,3 +1,5 @@
+from typing import Any
+
 from fastapi import APIRouter, HTTPException
 from loguru import logger
 from surreal_commands import get_command_status
@@ -10,8 +12,9 @@ from api.models import (
     RebuildStats,
     RebuildStatusResponse,
 )
-from open_notebook.database.repository import repo_query
+from open_notebook.database.repository import ensure_record_id, repo_query
 from open_notebook.exceptions import OpenNotebookError
+from open_notebook.utils.current_user import current_user
 
 router = APIRouter()
 
@@ -38,22 +41,32 @@ async def start_rebuild(request: RebuildRequest):
         # This is a rough estimate before the command runs
         total_estimate = 0
 
+        # Scope the estimate to the current user's rows (no user = workers,
+        # unscoped — the rebuild job itself runs unscoped until slice 4).
+        _owner = current_user.get()
+        owner = ensure_record_id(_owner.id) if _owner and _owner.id else None
+        owner_where = "owner = $owner AND " if owner else ""
+        owner_where_only = " WHERE owner = $owner" if owner else ""
+        owner_params: dict[str, Any] = {"owner": owner} if owner else {}
+
         if request.include_sources:
             if request.mode == "existing":
                 # Count sources with embeddings
                 result = await repo_query(
-                    """
+                    f"""
                     SELECT VALUE count(array::distinct(
                         SELECT VALUE source.id
                         FROM source_embedding
-                        WHERE embedding != none AND array::len(embedding) > 0
-                    )) as count FROM {}
-                    """
+                        WHERE {owner_where}embedding != none AND array::len(embedding) > 0
+                    )) as count FROM {{}}
+                    """,
+                    owner_params,
                 )
             else:
                 # Count all sources with content
                 result = await repo_query(
-                    "SELECT VALUE count() as count FROM source WHERE full_text != none GROUP ALL"
+                    f"SELECT VALUE count() as count FROM source WHERE {owner_where}full_text != none GROUP ALL",
+                    owner_params,
                 )
 
             if result and isinstance(result[0], dict):
@@ -64,11 +77,13 @@ async def start_rebuild(request: RebuildRequest):
         if request.include_notes:
             if request.mode == "existing":
                 result = await repo_query(
-                    "SELECT VALUE count() as count FROM note WHERE embedding != none AND array::len(embedding) > 0 GROUP ALL"
+                    f"SELECT VALUE count() as count FROM note WHERE {owner_where}embedding != none AND array::len(embedding) > 0 GROUP ALL",
+                    owner_params,
                 )
             else:
                 result = await repo_query(
-                    "SELECT VALUE count() as count FROM note WHERE content != none GROUP ALL"
+                    f"SELECT VALUE count() as count FROM note WHERE {owner_where}content != none GROUP ALL",
+                    owner_params,
                 )
 
             if result and isinstance(result[0], dict):
@@ -79,11 +94,13 @@ async def start_rebuild(request: RebuildRequest):
         if request.include_insights:
             if request.mode == "existing":
                 result = await repo_query(
-                    "SELECT VALUE count() as count FROM source_insight WHERE embedding != none AND array::len(embedding) > 0 GROUP ALL"
+                    f"SELECT VALUE count() as count FROM source_insight WHERE {owner_where}embedding != none AND array::len(embedding) > 0 GROUP ALL",
+                    owner_params,
                 )
             else:
                 result = await repo_query(
-                    "SELECT VALUE count() as count FROM source_insight GROUP ALL"
+                    f"SELECT VALUE count() as count FROM source_insight{owner_where_only} GROUP ALL",
+                    owner_params,
                 )
 
             if result and isinstance(result[0], dict):

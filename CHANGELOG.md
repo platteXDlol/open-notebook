@@ -15,6 +15,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- **Per-user data isolation.** Content is now owned by the user who created it: notebooks, sources, notes, chat sessions, embeddings, insights, podcast episodes and artifacts carry an `owner`, and every read path (endpoints, search, embedding rebuilds, job submission) is scoped to the current user — other users' records return 404. Models, credentials, transformations and podcast profiles remain shared across users until per-user variants land. On first setup, the first admin adopts all pre-existing content; the search functions accept an optional `$owner` argument that background workers leave unset
 - **CORS credentials for the same-host default.** Session cookies are now the authentication mechanism, so the same-host default (unset `CORS_ORIGINS`) and any explicitly listed origins send `Access-Control-Allow-Credentials: true` for each listed origin; `CORS_ORIGINS=*` never does
 
 ### Removed
@@ -34,6 +35,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Text search ranks the best match first.** `fn::text_search` had the same single-`SELECT` group/order/limit as vector search, so results came back in record-id order (notes before sources) and the `LIMIT` could drop the best match. Nothing re-sorted them afterwards, so the wrong order reached the search page and Ask as-is. Migration 26 now fixes both functions the same way (#1505)
 - Search result counts use the correct singular and plural forms in every supported language (#1402)
 - Adding a source that is already in a notebook no longer links it a second time. The duplicate check looked the link up in the wrong direction, so each call added another link: the notebook's source count went up and the source was listed twice (#1533)
+- **User and session tables are created on migration.** Migration 27 (the `user` and `session` tables from the session-account release) was missing from the migration runner's list, so live instances upgrading past it never created those tables. The runner now applies it, together with migration 28 (per-user ownership)
+- **Per-user ownership works against a live database.** The SurrealDB SDK does not coerce `"user:xxx"` strings into `record<user>` values, and a `WHERE owner = $owner` filter with a string parameter silently matches nothing, so first-time setup answered 500 and every owner-scoped read returned an empty list on real instances. All ownership writes and read paths now bind a real record ID, and user creation normalizes the record returned by the database
 
 ## [1.15.1] - 2026-11-03
 

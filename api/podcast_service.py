@@ -6,7 +6,9 @@ from pydantic import BaseModel
 from surreal_commands import get_command_status, submit_command
 
 from open_notebook.domain.notebook import Notebook
+from open_notebook.exceptions import NotFoundError
 from open_notebook.podcasts.models import EpisodeProfile, PodcastEpisode, SpeakerProfile
+from open_notebook.utils.current_user import current_user
 
 
 class PodcastGenerationRequest(BaseModel):
@@ -65,6 +67,10 @@ class PodcastService:
                         if hasattr(notebook, "get_context")
                         else str(notebook)
                     )
+                except NotFoundError:
+                    # Foreign or missing notebook: propagate so the router
+                    # answers 404 instead of silently using an ID as content.
+                    raise
                 except Exception as e:
                     logger.warning(
                         f"Failed to get notebook content, using notebook_id as content: {e}"
@@ -84,6 +90,12 @@ class PodcastService:
                 "content": str(content),
                 "briefing_suffix": briefing_suffix,
             }
+
+            # Bind the episode to the submitting user (workers running
+            # without a user leave owner unset — legacy/global).
+            owner = current_user.get()
+            if owner is not None:
+                command_args["owner"] = owner.id
 
             # Ensure command modules are imported before submitting
             # This is needed because submit_command validates against local registry
@@ -105,6 +117,8 @@ class PodcastService:
             )
             return job_id_str
 
+        except NotFoundError:
+            raise
         except Exception as e:
             logger.error(f"Failed to submit podcast generation job: {e}")
             raise HTTPException(

@@ -85,11 +85,16 @@ class Model(ObjectModel):
     provider: str
     type: str
     credential: Optional[str] = None
+    global_or_user: ClassVar[bool] = True
+    owner: Optional[Union[str, RecordID]] = None
 
     @classmethod
     async def get_models_by_type(cls, model_type):
+        owner_where, owner_params = cls._owner_scope()
+        where_clause = f" AND {owner_where}" if owner_where else ""
         models = await repo_query(
-            "SELECT * FROM model WHERE type=$model_type;", {"model_type": model_type}
+            f"SELECT * FROM model WHERE type=$model_type{where_clause};",
+            {**owner_params, "model_type": model_type},
         )
         return [Model(**model) for model in models]
 
