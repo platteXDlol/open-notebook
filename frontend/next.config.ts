@@ -20,6 +20,10 @@ const nextConfig: NextConfig = {
     // Increase proxy body size limit for file uploads (default is 10MB)
     // This allows larger files to be uploaded through the /api/* rewrite proxy to FastAPI
     proxyClientMaxBodySize: '100mb',
+    // Security upgrade channel for agent-assisted Next.js updates (set by
+    // `next upgrade --agent=security`); keeps this app opted into security
+    // advisory upgrades.
+    agentUpgrade: "security",
   } as NextConfig['experimental'],
 
   // API Rewrites: Proxy /api/* requests to FastAPI backend
