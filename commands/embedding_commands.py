@@ -22,7 +22,7 @@ from open_notebook.exceptions import (
     NotFoundError,
 )
 from open_notebook.utils.chunking import ContentType, chunk_text, detect_content_type
-from open_notebook.utils.current_user import current_user
+from open_notebook.utils.current_user import current_user, require_user, run_as
 from open_notebook.utils.embedding import generate_embedding, generate_embeddings
 
 # NOTE: `stop_on` below can never trigger in practice — each command catches
@@ -148,6 +148,9 @@ class RebuildEmbeddingsInput(CommandInput):
     include_sources: bool = True
     include_notes: bool = True
     include_insights: bool = True
+    # Multi-user slice 4: the submitting user, bound by run_as before any
+    # side effect (ownership stamping, job dispatch).
+    user_id: str
 
 
 class RebuildEmbeddingsOutput(CommandOutput):
@@ -168,6 +171,8 @@ class CreateInsightInput(CommandInput):
     source_id: str
     insight_type: str
     content: str
+    # Multi-user slice 4: the submitting user (see SourceProcessingInput).
+    user_id: str
 
 
 class CreateInsightOutput(CommandOutput):
@@ -183,6 +188,8 @@ class EmbedNoteInput(CommandInput):
     """Input for embedding a single note."""
 
     note_id: str
+    # Multi-user slice 4: the submitting user (see SourceProcessingInput).
+    user_id: str
 
 
 class EmbedNoteOutput(CommandOutput):
@@ -198,6 +205,8 @@ class EmbedInsightInput(CommandInput):
     """Input for embedding a single source insight."""
 
     insight_id: str
+    # Multi-user slice 4: the submitting user (see SourceProcessingInput).
+    user_id: str
 
 
 class EmbedInsightOutput(CommandOutput):
@@ -213,6 +222,8 @@ class EmbedSourceInput(CommandInput):
     """Input for embedding a source (creates multiple chunk embeddings)."""
 
     source_id: str
+    # Multi-user slice 4: the submitting user (see SourceProcessingInput).
+    user_id: str
 
 
 class EmbedSourceOutput(CommandOutput):
@@ -253,19 +264,20 @@ async def embed_note_command(input_data: EmbedNoteInput) -> EmbedNoteOutput:
             loader=Note.get,
         )
 
-    _, processing_time, error_message = await _embed_record(
-        input_data,
-        kind="note",
-        record_id=input_data.note_id,
-        embed=embed,
-    )
+    async with run_as(input_data.user_id):
+        _, processing_time, error_message = await _embed_record(
+            input_data,
+            kind="note",
+            record_id=input_data.note_id,
+            embed=embed,
+        )
 
-    return EmbedNoteOutput(
-        success=error_message is None,
-        note_id=input_data.note_id,
-        processing_time=processing_time,
-        error_message=error_message,
-    )
+        return EmbedNoteOutput(
+            success=error_message is None,
+            note_id=input_data.note_id,
+            processing_time=processing_time,
+            error_message=error_message,
+        )
 
 
 @command("embed_insight", app="open_notebook", retry=EMBED_RETRY_CONFIG)
@@ -296,19 +308,20 @@ async def embed_insight_command(input_data: EmbedInsightInput) -> EmbedInsightOu
             loader=SourceInsight.get,
         )
 
-    _, processing_time, error_message = await _embed_record(
-        input_data,
-        kind="insight",
-        record_id=input_data.insight_id,
-        embed=embed,
-    )
+    async with run_as(input_data.user_id):
+        _, processing_time, error_message = await _embed_record(
+            input_data,
+            kind="insight",
+            record_id=input_data.insight_id,
+            embed=embed,
+        )
 
-    return EmbedInsightOutput(
-        success=error_message is None,
-        insight_id=input_data.insight_id,
-        processing_time=processing_time,
-        error_message=error_message,
-    )
+        return EmbedInsightOutput(
+            success=error_message is None,
+            insight_id=input_data.insight_id,
+            processing_time=processing_time,
+            error_message=error_message,
+        )
 
 
 @command("embed_source", app="open_notebook", retry=EMBED_RETRY_CONFIG)
@@ -418,20 +431,21 @@ async def embed_source_command(input_data: EmbedSourceInput) -> EmbedSourceOutpu
 
         return {"chunks_created": total_chunks}, f": {total_chunks} chunks"
 
-    extra_fields, processing_time, error_message = await _embed_record(
-        input_data,
-        kind="source",
-        record_id=input_data.source_id,
-        embed=embed,
-    )
+    async with run_as(input_data.user_id):
+        extra_fields, processing_time, error_message = await _embed_record(
+            input_data,
+            kind="source",
+            record_id=input_data.source_id,
+            embed=embed,
+        )
 
-    return EmbedSourceOutput(
-        success=error_message is None,
-        source_id=input_data.source_id,
-        chunks_created=(extra_fields or {}).get("chunks_created", 0),
-        processing_time=processing_time,
-        error_message=error_message,
-    )
+        return EmbedSourceOutput(
+            success=error_message is None,
+            source_id=input_data.source_id,
+            chunks_created=(extra_fields or {}).get("chunks_created", 0),
+            processing_time=processing_time,
+            error_message=error_message,
+        )
 
 
 @command("create_insight", app="open_notebook", retry=EMBED_RETRY_CONFIG)
@@ -456,6 +470,13 @@ async def create_insight_command(
     - Does NOT retry permanent failures (ValueError for validation errors,
       NotFoundError for a record deleted before the job ran)
     """
+    async with run_as(input_data.user_id):
+        return await _create_insight(input_data)
+
+
+async def _create_insight(
+    input_data: CreateInsightInput,
+) -> CreateInsightOutput:
     start_time = time.time()
 
     try:
@@ -495,7 +516,10 @@ async def create_insight_command(
         submit_command(
             "open_notebook",
             "embed_insight",
-            {"insight_id": insight_id},
+            {
+                "insight_id": insight_id,
+                "user_id": require_user().id,
+            },
         )
         logger.debug(f"Submitted embed_insight command for {insight_id}")
 
@@ -637,7 +661,10 @@ def _submit_embedding_jobs(
             submit_command(
                 "open_notebook",
                 command_name,
-                {id_field: item_id},
+                {
+                    "user_id": require_user().id,
+                    id_field: item_id,
+                },
             )
             submitted += 1
 
@@ -671,6 +698,13 @@ async def rebuild_embeddings_command(
     - Retries disabled (retry=None) for this coordinator command
     - Individual embed_* commands handle their own retries
     """
+    async with run_as(input_data.user_id):
+        return await _rebuild_embeddings(input_data)
+
+
+async def _rebuild_embeddings(
+    input_data: RebuildEmbeddingsInput,
+) -> RebuildEmbeddingsOutput:
     start_time = time.time()
 
     try:

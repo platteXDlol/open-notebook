@@ -15,9 +15,11 @@ from typing import cast
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
+from conftest import TEST_ADMIN_USER
 
 from open_notebook.domain.notebook import Source
 from open_notebook.exceptions import DatabaseOperationError, InvalidInputError
+from open_notebook.utils.current_user import current_user
 
 
 def make_source(**overrides):
@@ -30,11 +32,15 @@ class TestAddInsightRaisesOnSubmissionFailure:
     @pytest.mark.asyncio
     async def test_returns_command_id_on_success(self):
         source = make_source()
-        with patch(
-            "open_notebook.domain.notebook.submit_command",
-            return_value="command:abc123",
-        ):
-            result = await source.add_insight("Summary", "some content")
+        token = current_user.set(TEST_ADMIN_USER)
+        try:
+            with patch(
+                "open_notebook.domain.notebook.submit_command",
+                return_value="command:abc123",
+            ):
+                result = await source.add_insight("Summary", "some content")
+        finally:
+            current_user.reset(token)
         assert result == "command:abc123"
 
     @pytest.mark.asyncio
@@ -192,10 +198,16 @@ class TestRunTransformationCommandDoesNotReportFalseSuccess:
         transformation = MagicMock(id="transformation:1")
 
         input_data = RunTransformationInput(
-            source_id="source:test123", transformation_id="transformation:1"
+            source_id="source:test123",
+            transformation_id="transformation:1",
+            user_id="user:tests",
         )
 
         with (
+            patch(
+                "open_notebook.domain.user.User.get",
+                new=AsyncMock(return_value=TEST_ADMIN_USER),
+            ),
             patch(
                 "commands.source_commands.Source.get",
                 new=AsyncMock(return_value=source),

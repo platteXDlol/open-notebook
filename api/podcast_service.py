@@ -8,7 +8,7 @@ from surreal_commands import get_command_status, submit_command
 from open_notebook.domain.notebook import Notebook
 from open_notebook.exceptions import NotFoundError
 from open_notebook.podcasts.models import EpisodeProfile, PodcastEpisode, SpeakerProfile
-from open_notebook.utils.current_user import current_user
+from open_notebook.utils.current_user import require_user
 
 
 class PodcastGenerationRequest(BaseModel):
@@ -91,11 +91,9 @@ class PodcastService:
                 "briefing_suffix": briefing_suffix,
             }
 
-            # Bind the episode to the submitting user (workers running
-            # without a user leave owner unset — legacy/global).
-            owner = current_user.get()
-            if owner is not None:
-                command_args["owner"] = owner.id
+            # Multi-user slice 4: the job carries the submitting user; the
+            # command binds it via run_as, which stamps the episode owner.
+            command_args["user_id"] = require_user().id
 
             # Ensure command modules are imported before submitting
             # This is needed because submit_command validates against local registry

@@ -9,6 +9,7 @@ insert stores its first batch before failing on the second.
 from unittest.mock import AsyncMock, patch
 
 import pytest
+from conftest import TEST_ADMIN_USER
 
 from commands.embedding_commands import EmbedSourceInput, embed_source_command
 
@@ -74,9 +75,21 @@ async def test_failure_on_later_batch_leaves_no_embeddings():
     table = _FakeEmbeddingTable(fail_on_batch=1)
     p1, p2, p3, p4, p5 = _patches(table, n_chunks=120)
 
-    with p1, p2, p3, p4, p5:
+    with (
+        p1,
+        p2,
+        p3,
+        p4,
+        p5,
+        patch(
+            "open_notebook.domain.user.User.get",
+            new=AsyncMock(return_value=TEST_ADMIN_USER),
+        ),
+    ):
         with pytest.raises(ConnectionError, match="websocket closed"):
-            await embed_source_command(EmbedSourceInput(source_id=SOURCE_ID))
+            await embed_source_command(
+                EmbedSourceInput(source_id=SOURCE_ID, user_id="user:tests")
+            )
 
     assert table.rows_for(SOURCE_ID) == []
     assert len(table.rows_for(OTHER_SOURCE_ID)) == 1
@@ -101,9 +114,15 @@ async def test_original_error_is_reraised_when_cleanup_also_fails():
         p3,
         p5,
         patch("commands.embedding_commands.repo_query", new=flaky_query),
+        patch(
+            "open_notebook.domain.user.User.get",
+            new=AsyncMock(return_value=TEST_ADMIN_USER),
+        ),
     ):
         with pytest.raises(ConnectionError, match="websocket closed"):
-            await embed_source_command(EmbedSourceInput(source_id=SOURCE_ID))
+            await embed_source_command(
+                EmbedSourceInput(source_id=SOURCE_ID, user_id="user:tests")
+            )
 
 
 @pytest.mark.asyncio
@@ -111,8 +130,20 @@ async def test_successful_insert_keeps_all_embeddings():
     table = _FakeEmbeddingTable(fail_on_batch=-1)
     p1, p2, p3, p4, p5 = _patches(table, n_chunks=120)
 
-    with p1, p2, p3, p4, p5:
-        result = await embed_source_command(EmbedSourceInput(source_id=SOURCE_ID))
+    with (
+        p1,
+        p2,
+        p3,
+        p4,
+        p5,
+        patch(
+            "open_notebook.domain.user.User.get",
+            new=AsyncMock(return_value=TEST_ADMIN_USER),
+        ),
+    ):
+        result = await embed_source_command(
+            EmbedSourceInput(source_id=SOURCE_ID, user_id="user:tests")
+        )
 
     assert result.success is True
     assert result.chunks_created == 120

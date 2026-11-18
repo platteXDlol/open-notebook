@@ -18,12 +18,14 @@ assertion is purely about WHICH speaker profile reference was resolved.
 from unittest.mock import AsyncMock, Mock, patch
 
 import pytest
+from conftest import TEST_ADMIN_USER
 
 from commands.podcast_commands import (
     PodcastGenerationInput,
     generate_podcast_command,
 )
 from open_notebook.podcasts.models import EpisodeProfile, SpeakerProfile
+from open_notebook.utils.current_user import current_user
 
 
 def make_episode_profile(speaker_config="speaker_profile:from_episode"):
@@ -39,6 +41,7 @@ def make_input(speaker_profile=None):
         speaker_profile=speaker_profile,
         episode_name="Test Episode",
         content="test content",
+        user_id="user:tests",
     )
 
 
@@ -59,6 +62,10 @@ class TestSpeakerProfileResolution:
                 new=AsyncMock(return_value=episode_profile),
             ),
             patch.object(SpeakerProfile, "resolve", new=speaker_resolve),
+            patch(
+                "open_notebook.domain.user.User.get",
+                new=AsyncMock(return_value=TEST_ADMIN_USER),
+            ),
         ):
             with pytest.raises(
                 ValueError, match="Speaker profile 'new-name' not found"
@@ -83,6 +90,10 @@ class TestSpeakerProfileResolution:
                 new=AsyncMock(return_value=episode_profile),
             ),
             patch.object(SpeakerProfile, "resolve", new=speaker_resolve),
+            patch(
+                "open_notebook.domain.user.User.get",
+                new=AsyncMock(return_value=TEST_ADMIN_USER),
+            ),
         ):
             with pytest.raises(
                 ValueError,
@@ -107,6 +118,10 @@ class TestSpeakerProfileResolution:
                 new=AsyncMock(return_value=episode_profile),
             ),
             patch.object(SpeakerProfile, "resolve", new=speaker_resolve),
+            patch(
+                "open_notebook.domain.user.User.get",
+                new=AsyncMock(return_value=TEST_ADMIN_USER),
+            ),
         ):
             with pytest.raises(ValueError, match="has no speaker profile configured"):
                 await generate_podcast_command(make_input(speaker_profile=None))
@@ -119,6 +134,7 @@ class TestSpeakerProfileResolution:
             episode_profile="Test Episode Profile",
             episode_name="Test Episode",
             content="test content",
+            user_id="user:tests",
         )
         assert input_data.speaker_profile is None
 
@@ -192,24 +208,28 @@ class TestApiBoundaryResolvesNameToRecordId:
         speaker_profile.id = "speaker_profile:abc"
         speaker_profile.name = "Tech Experts"
 
-        with (
-            patch(
-                "api.podcast_service.EpisodeProfile.get_by_name",
-                new=AsyncMock(return_value=episode_profile),
-            ),
-            patch(
-                "api.podcast_service.SpeakerProfile.resolve",
-                new=AsyncMock(return_value=speaker_profile),
-            ) as mock_resolve,
-            patch("api.podcast_service.submit_command") as mock_submit,
-        ):
-            mock_submit.return_value = "command:job1"
-            job_id = await PodcastService.submit_generation_job(
-                episode_profile_name="Deep Dive",
-                speaker_profile_name="Tech Experts",
-                episode_name="Episode 1",
-                content="some content",
-            )
+        token = current_user.set(TEST_ADMIN_USER)
+        try:
+            with (
+                patch(
+                    "api.podcast_service.EpisodeProfile.get_by_name",
+                    new=AsyncMock(return_value=episode_profile),
+                ),
+                patch(
+                    "api.podcast_service.SpeakerProfile.resolve",
+                    new=AsyncMock(return_value=speaker_profile),
+                ) as mock_resolve,
+                patch("api.podcast_service.submit_command") as mock_submit,
+            ):
+                mock_submit.return_value = "command:job1"
+                job_id = await PodcastService.submit_generation_job(
+                    episode_profile_name="Deep Dive",
+                    speaker_profile_name="Tech Experts",
+                    episode_name="Episode 1",
+                    content="some content",
+                )
+        finally:
+            current_user.reset(token)
 
         assert job_id == "command:job1"
         mock_resolve.assert_awaited_once_with("Tech Experts")
@@ -384,6 +404,10 @@ class TestOrphanedProfileDoesNotPoisonConfig:
                 "open_notebook.podcasts.models.PodcastEpisode.save",
                 new=AsyncMock(),
             ),
+            patch(
+                "open_notebook.domain.user.User.get",
+                new=AsyncMock(return_value=TEST_ADMIN_USER),
+            ),
         ):
             result = await generate_podcast_command(make_input())
 
@@ -501,6 +525,10 @@ class TestUnconfiguredSpeakerProfileDoesNotPoisonConfig:
                 new=lambda *args: ("ep-dir", tmp_path / "ep-dir"),
             ),
             patch("open_notebook.podcasts.models.PodcastEpisode.save", new=AsyncMock()),
+            patch(
+                "open_notebook.domain.user.User.get",
+                new=AsyncMock(return_value=TEST_ADMIN_USER),
+            ),
         ):
             result = await generate_podcast_command(make_input())
 

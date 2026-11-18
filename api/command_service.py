@@ -3,6 +3,8 @@ from typing import Any, Dict, List, Optional
 from loguru import logger
 from surreal_commands import get_command_status, submit_command
 
+from open_notebook.utils.current_user import require_user
+
 
 class CommandService:
     """Generic service layer for command operations"""
@@ -23,6 +25,10 @@ class CommandService:
             except ImportError as import_err:
                 logger.error(f"Failed to import command modules: {import_err}")
                 raise ValueError("Command modules not available")
+
+            # Multi-user slice 4: every job carries its submitting user; the
+            # command binds it via run_as before any database write.
+            command_args["user_id"] = require_user().id
 
             # surreal-commands expects: submit_command(app_name, command_name, args)
             cmd_id = submit_command(

@@ -4,6 +4,7 @@ from types import SimpleNamespace
 from unittest.mock import AsyncMock, patch
 
 import pytest
+from conftest import TEST_ADMIN_USER
 from langchain_core.messages import AIMessage
 from surreal_commands.core.registry import registry
 from surreal_commands.core.retry import build_async_retry_instance
@@ -154,6 +155,7 @@ async def test_commands_log_incomplete_generation_as_permanent(during_import):
             notebook_ids=[],
             transformations=[],
             embed=False,
+            user_id="user:tests",
         )
         graph_path = "commands.source_commands.source_graph.ainvoke"
     else:
@@ -161,6 +163,7 @@ async def test_commands_log_incomplete_generation_as_permanent(during_import):
         data = RunTransformationInput(
             source_id="source:test",
             transformation_id="transformation:test",
+            user_id="user:tests",
         )
         graph_path = "commands.source_commands.transform_graph.ainvoke"
 
@@ -174,6 +177,10 @@ async def test_commands_log_incomplete_generation_as_permanent(during_import):
             new=AsyncMock(
                 return_value=SimpleNamespace(model_id=None),
             ),
+        ),
+        patch(
+            "open_notebook.domain.user.User.get",
+            new=AsyncMock(return_value=TEST_ADMIN_USER),
         ),
         patch(graph_path, new=AsyncMock(side_effect=error)),
         patch("commands.source_commands.logger") as logger,

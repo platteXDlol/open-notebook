@@ -17,6 +17,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - **Per-user data isolation.** Content is now owned by the user who created it: notebooks, sources, notes, chat sessions, embeddings, insights, podcast episodes and artifacts carry an `owner`, and every read path (endpoints, search, embedding rebuilds, job submission) is scoped to the current user — other users' records return 404. Models, credentials, transformations and podcast profiles remain shared across users until per-user variants land. On first setup, the first admin adopts all pre-existing content; the search functions accept an optional `$owner` argument that background workers leave unset
 - **CORS credentials for the same-host default.** Session cookies are now the authentication mechanism, so the same-host default (unset `CORS_ORIGINS`) and any explicitly listed origins send `Access-Control-Allow-Credentials: true` for each listed origin; `CORS_ORIGINS=*` never does
+- **Background jobs run as the user who submitted them.** Every submitted job (source processing, embeddings, insights, transformations, podcast generation, embedding rebuilds) carries the submitting user's id, and the worker re-checks that the user still exists before the job runs — a job whose user is missing fails permanently instead of writing records. Podcast episodes are stamped with the submitting user as owner, and every record a job creates is owned by that user (children of a source keep the source's owner)
 
 ### Removed
 

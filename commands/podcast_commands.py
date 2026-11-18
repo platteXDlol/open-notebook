@@ -15,6 +15,7 @@ from open_notebook.podcasts.models import (
     SpeakerProfile,
     _resolve_model_config,
 )
+from open_notebook.utils.current_user import run_as
 from open_notebook.utils.model_utils import full_model_dump
 
 try:
@@ -105,8 +106,10 @@ class PodcastGenerationInput(CommandInput):
     episode_name: str
     content: str
     briefing_suffix: Optional[str] = None
-    # Submitting user (set by the API boundary; unset for legacy jobs).
-    owner: Optional[str] = None
+    # Multi-user slice 4: the submitting user, bound by run_as before any
+    # database write. Required — legacy queued jobs without it fail
+    # validation instead of running unscoped.
+    user_id: str
 
 
 class PodcastGenerationOutput(CommandOutput):
@@ -126,6 +129,14 @@ async def generate_podcast_command(
     """
     Real podcast generation using podcast-creator library with Episode Profiles
     """
+    async with run_as(input_data.user_id):
+        return await _generate_podcast(input_data)
+
+
+async def _generate_podcast(
+    input_data: PodcastGenerationInput,
+) -> PodcastGenerationOutput:
+    """Original command body: profile validation, briefing, generation, save."""
     start_time = time.time()
 
     try:
@@ -342,7 +353,6 @@ async def generate_podcast_command(
             audio_file=None,
             transcript=None,
             outline=None,
-            owner=input_data.owner,
         )
         await episode.save()
 

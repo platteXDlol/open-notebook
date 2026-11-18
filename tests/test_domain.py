@@ -12,6 +12,7 @@ from types import ModuleType, SimpleNamespace
 from unittest.mock import AsyncMock, patch
 
 import pytest
+from conftest import TEST_ADMIN_USER
 from pydantic import ValidationError
 
 from api.podcast_service import PodcastService
@@ -28,6 +29,7 @@ from open_notebook.domain.notebook import (
 from open_notebook.domain.transformation import Transformation
 from open_notebook.exceptions import InvalidInputError
 from open_notebook.podcasts.models import EpisodeProfile, SpeakerProfile
+from open_notebook.utils.current_user import current_user
 
 # ============================================================================
 # TEST SUITE 1: RecordModel Singleton Pattern
@@ -387,16 +389,21 @@ class TestSourceDomain:
     async def test_vectorize_submits_command_with_valid_text(self):
         """Test that vectorize() submits embed_source command when text is valid."""
         source = Source(id="source:test_valid", title="Test", full_text="Real content")
-        with patch(
-            "open_notebook.domain.notebook.submit_command", return_value="command:123"
-        ) as mock_submit:
-            result = await source.vectorize()
-            mock_submit.assert_called_once_with(
-                "open_notebook",
-                "embed_source",
-                {"source_id": "source:test_valid"},
-            )
-            assert result == "command:123"
+        token = current_user.set(TEST_ADMIN_USER)
+        try:
+            with patch(
+                "open_notebook.domain.notebook.submit_command",
+                return_value="command:123",
+            ) as mock_submit:
+                result = await source.vectorize()
+                mock_submit.assert_called_once_with(
+                    "open_notebook",
+                    "embed_source",
+                    {"source_id": "source:test_valid", "user_id": "user:tests"},
+                )
+                assert result == "command:123"
+        finally:
+            current_user.reset(token)
 
 
 # ============================================================================
@@ -530,36 +537,42 @@ class TestPodcastService:
         # setattr: dynamic module attribute mypy can't know about
         setattr(fake_commands_module, "generate_podcast_command", lambda *a, **k: None)
 
-        with (
-            patch.object(
-                EpisodeProfile, "get_by_name", new=AsyncMock(return_value=object())
-            ),
-            patch.object(
-                SpeakerProfile,
-                "get_by_name",
-                new=AsyncMock(
-                    return_value=SimpleNamespace(
-                        id="speaker_profile:speakers", name="Speakers"
-                    )
+        token = current_user.set(TEST_ADMIN_USER)
+        try:
+            with (
+                patch.object(
+                    EpisodeProfile, "get_by_name", new=AsyncMock(return_value=object())
                 ),
-            ),
-            patch.object(Notebook, "get", new=AsyncMock(return_value=notebook)),
-            patch.object(Notebook, "get_sources", new=fake_get_sources),
-            patch.object(Notebook, "get_notes", new=fake_get_notes),
-            patch.object(
-                SourceInsight, "get_for_sources", new=classmethod(fake_get_for_sources)
-            ),
-            patch("api.podcast_service.submit_command", new=fake_submit_command),
-            patch.dict(
-                sys.modules, {"commands.podcast_commands": fake_commands_module}
-            ),
-        ):
-            job_id = await PodcastService.submit_generation_job(
-                episode_profile_name="Episode",
-                speaker_profile_name="Speakers",
-                episode_name="Episode Name",
-                notebook_id="notebook:test",
-            )
+                patch.object(
+                    SpeakerProfile,
+                    "get_by_name",
+                    new=AsyncMock(
+                        return_value=SimpleNamespace(
+                            id="speaker_profile:speakers", name="Speakers"
+                        )
+                    ),
+                ),
+                patch.object(Notebook, "get", new=AsyncMock(return_value=notebook)),
+                patch.object(Notebook, "get_sources", new=fake_get_sources),
+                patch.object(Notebook, "get_notes", new=fake_get_notes),
+                patch.object(
+                    SourceInsight,
+                    "get_for_sources",
+                    new=classmethod(fake_get_for_sources),
+                ),
+                patch("api.podcast_service.submit_command", new=fake_submit_command),
+                patch.dict(
+                    sys.modules, {"commands.podcast_commands": fake_commands_module}
+                ),
+            ):
+                job_id = await PodcastService.submit_generation_job(
+                    episode_profile_name="Episode",
+                    speaker_profile_name="Speakers",
+                    episode_name="Episode Name",
+                    notebook_id="notebook:test",
+                )
+        finally:
+            current_user.reset(token)
 
         assert job_id == "command:podcast"
         content = submitted_args["content"]

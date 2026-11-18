@@ -319,8 +319,14 @@ async def test_embed_source_records_inherit_owner():
         ),
         patch("commands.embedding_commands.repo_query", new=fake_repo_query),
         patch("commands.embedding_commands.repo_insert", new=fake_repo_insert),
+        patch(
+            "open_notebook.domain.user.User.get",
+            new=AsyncMock(return_value=TEST_ADMIN_USER),
+        ),
     ):
-        result = await embed_source_command(EmbedSourceInput(source_id="source:abc"))
+        result = await embed_source_command(
+            EmbedSourceInput(source_id="source:abc", user_id="user:tests")
+        )
 
     assert result.success is True
     assert [r.get("owner") for r in inserted["records"]] == [
@@ -347,10 +353,17 @@ async def test_create_insight_inherits_owner():
         ),
         patch("commands.embedding_commands.repo_query", new=fake),
         patch("commands.embedding_commands.submit_command"),
+        patch(
+            "open_notebook.domain.user.User.get",
+            new=AsyncMock(return_value=TEST_ADMIN_USER),
+        ),
     ):
         result = await create_insight_command(
             CreateInsightInput(
-                source_id="source:abc", insight_type="summary", content="insight"
+                source_id="source:abc",
+                insight_type="summary",
+                content="insight",
+                user_id="user:tests",
             )
         )
 
@@ -414,7 +427,7 @@ async def test_podcast_generation_job_inherits_owner():
     finally:
         _reset_user(token)
     assert job_id == "job:1"
-    assert submitted["args"]["owner"] == TEST_ADMIN_USER.id
+    assert submitted["args"]["user_id"] == TEST_ADMIN_USER.id
 
 
 # ---------------------------------------------------------------------------

@@ -34,6 +34,18 @@ def client(api_session_test):
 
 
 class TestNoteSaveEmbedResilience:
+    @pytest.fixture(autouse=True)
+    def _bound_user(self):
+        """Note.save() submits embed_note with the acting user's id, so these
+        direct (non-HTTP) save() calls need a bound current user."""
+        from conftest import TEST_ADMIN_USER
+
+        from open_notebook.utils.current_user import current_user
+
+        token = current_user.set(TEST_ADMIN_USER)
+        yield
+        current_user.reset(token)
+
     @pytest.mark.asyncio
     async def test_save_does_not_raise_when_submission_fails(self):
         note = Note(title="Test", content="some content")
