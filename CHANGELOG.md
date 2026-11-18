@@ -36,6 +36,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Search result counts use the correct singular and plural forms in every supported language (#1402)
 - Adding a source that is already in a notebook no longer links it a second time. The duplicate check looked the link up in the wrong direction, so each call added another link: the notebook's source count went up and the source was listed twice (#1533)
 - **User and session tables are created on migration.** Migration 27 (the `user` and `session` tables from the session-account release) was missing from the migration runner's list, so live instances upgrading past it never created those tables. The runner now applies it, together with migration 28 (per-user ownership)
+- **Per-user ownership works against a live database.** The SurrealDB SDK does not coerce `"user:xxx"` strings into `record<user>` values, and a `WHERE owner = $owner` filter with a string parameter silently matches nothing, so first-time setup answered 500 and every owner-scoped read returned an empty list on real instances. All ownership writes and read paths now bind a real record ID, and user creation normalizes the record returned by the database
 
 ## [1.15.1] - 2026-11-03
 

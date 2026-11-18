@@ -837,17 +837,21 @@ async def resolve_notebook_scope(notebook_ids: List[str]) -> List[str]:
     return notebook_ids
 
 
-def _search_owner() -> Optional[str]:
+def _search_owner() -> Optional[RecordID]:
     """Current user id for owner-scoped search, or None to search globally.
 
     None (no user bound, e.g. workers) keeps the search functions usable from
     background jobs that must see every user's content.
+    Returns a RecordID: the $owner param is compared against a
+    record<user> field, and strings silently match nothing.
     """
     # Lazy import: current_user imports domain.user, which imports this module.
     from open_notebook.utils.current_user import current_user
 
     user = current_user.get()
-    return user.id if user is not None else None
+    if user is None or user.id is None:
+        return None
+    return ensure_record_id(user.id)
 
 
 def _scope_record_ids(notebook_ids: Optional[List[str]]) -> Optional[List[RecordID]]:

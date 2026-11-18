@@ -17,7 +17,7 @@ from pydantic import BaseModel
 
 from api.auth import SESSION_COOKIE_NAME
 from api.models import AuthRequest, PasswordChangeRequest, UserResponse
-from open_notebook.database.repository import repo_query
+from open_notebook.database.repository import ensure_record_id, repo_query
 from open_notebook.domain.user import (
     SESSION_TTL,
     Session,
@@ -123,7 +123,8 @@ async def setup_first_admin(
         try:
             await repo_query(
                 f"UPDATE {table} SET owner = $admin WHERE owner = NONE",
-                {"admin": user.id},
+                # $admin is a record<user> value; strings fail on write.
+                {"admin": ensure_record_id(user.id) if user.id else None},
             )
         except Exception as e:
             logger.warning(f"Ownership backfill for {table} failed: {e}")

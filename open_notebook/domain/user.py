@@ -15,7 +15,11 @@ from typing import Any, ClassVar, Dict, Optional
 from loguru import logger
 from pydantic import field_validator
 
-from open_notebook.database.repository import repo_create, repo_query
+from open_notebook.database.repository import (
+    ensure_record_id,
+    repo_create,
+    repo_query,
+)
 from open_notebook.domain.base import ObjectModel
 from open_notebook.exceptions import (
     DatabaseOperationError,
@@ -109,7 +113,7 @@ class User(ObjectModel):
         if not username:
             raise InvalidInputError("Username must not be empty")
         try:
-            record = await repo_create(
+            record: Any = await repo_create(
                 "user",
                 {
                     "username": username,
@@ -120,7 +124,14 @@ class User(ObjectModel):
         except Exception as e:
             logger.exception(f"Error creating user {username}: {str(e)}")
             raise DatabaseOperationError(f"Failed to create user: {e}") from e
-        return cls(**record)
+        # SurrealDB INSERT returns a list of created records (even for a single
+        # dict) despite repo_create's declared dict return; keep the one we made.
+        created = record[0] if isinstance(record, list) else record
+        if not created:
+            raise DatabaseOperationError(
+                f"Failed to create user {username}: no record returned"
+            )
+        return cls(**created)
 
     @classmethod
     async def get_by_username(cls, username: str) -> Optional["User"]:
@@ -159,7 +170,8 @@ class Session(ObjectModel):
         token = secrets.token_urlsafe(32)  # 256 bits of entropy
         data: Dict[str, Any] = {
             "token_hash": _sha256_token(token),
-            "user": user.id,
+            # user is a record<user> field; the SDK does not coerce strings.
+            "user": ensure_record_id(user.id) if user.id else None,
             "expires": datetime.now(timezone.utc) + SESSION_TTL,
         }
         try:

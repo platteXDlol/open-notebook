@@ -391,7 +391,7 @@ async def embed_source_command(input_data: EmbedSourceInput) -> EmbedSourceOutpu
                 "order": idx,
                 "content": chunk,
                 "embedding": embedding,
-                "owner": source.owner,
+                "owner": ensure_record_id(source.owner) if source.owner else None,
             }
             for idx, (chunk, embedding) in enumerate(zip(chunks, embeddings))
         ]
@@ -480,7 +480,7 @@ async def create_insight_command(
                 "source_id": ensure_record_id(input_data.source_id),
                 "insight_type": input_data.insight_type,
                 "content": input_data.content,
-                "owner": source.owner,
+                "owner": ensure_record_id(source.owner) if source.owner else None,
             },
         )
 
@@ -551,8 +551,9 @@ async def collect_items_for_rebuild(
     # Workers (no user bound to the task) run unscoped; when a user is bound,
     # scope to their rows.
     user = current_user.get()
-    owner_where = "owner = $owner AND " if user else ""
-    owner_params = {"owner": user.id} if user else {}
+    owner = ensure_record_id(user.id) if user and user.id else None
+    owner_where = "owner = $owner AND " if owner else ""
+    owner_params = {"owner": owner} if owner else {}
 
     if include_sources:
         if mode == "existing":

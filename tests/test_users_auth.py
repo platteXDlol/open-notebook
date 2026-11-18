@@ -14,6 +14,7 @@ from pathlib import Path
 from unittest.mock import AsyncMock, patch
 
 import pytest
+from surrealdb import RecordID
 
 from open_notebook.domain.user import (
     Session,
@@ -128,7 +129,7 @@ async def test_session_create_stores_sha256_token_hash_not_raw_token():
     assert token and len(token) >= 43  # 256 bits of entropy
     assert data["token_hash"] == sha256_hex(token)
     assert data["token_hash"] != token
-    assert data["user"] == USER_ID
+    assert data["user"] == RecordID.parse(USER_ID)
     assert isinstance(data["expires"], datetime)
     assert data["expires"] > datetime.now(timezone.utc)
 

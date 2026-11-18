@@ -12,7 +12,7 @@ from api.models import (
     RebuildStats,
     RebuildStatusResponse,
 )
-from open_notebook.database.repository import repo_query
+from open_notebook.database.repository import ensure_record_id, repo_query
 from open_notebook.exceptions import OpenNotebookError
 from open_notebook.utils.current_user import current_user
 
@@ -44,9 +44,10 @@ async def start_rebuild(request: RebuildRequest):
         # Scope the estimate to the current user's rows (no user = workers,
         # unscoped — the rebuild job itself runs unscoped until slice 4).
         _owner = current_user.get()
-        owner_where = "owner = $owner AND " if _owner else ""
-        owner_where_only = " WHERE owner = $owner" if _owner else ""
-        owner_params: dict[str, Any] = {"owner": _owner.id} if _owner else {}
+        owner = ensure_record_id(_owner.id) if _owner and _owner.id else None
+        owner_where = "owner = $owner AND " if owner else ""
+        owner_where_only = " WHERE owner = $owner" if owner else ""
+        owner_params: dict[str, Any] = {"owner": owner} if owner else {}
 
         if request.include_sources:
             if request.mode == "existing":

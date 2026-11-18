@@ -20,6 +20,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 from conftest import TEST_ADMIN_USER, TEST_USER_B
+from surrealdb import RecordID
 
 from open_notebook.utils.current_user import current_user
 
@@ -62,7 +63,7 @@ async def test_owned_get_all_scoped_to_current_user():
         _reset_user(token)
     query, params = fake.calls[0]
     assert "owner = $owner" in query
-    assert params == {"owner": TEST_ADMIN_USER.id}
+    assert params == {"owner": RecordID.parse(TEST_ADMIN_USER.id)}
 
 
 @pytest.mark.asyncio
@@ -119,7 +120,7 @@ async def test_save_stamps_owner_on_create():
             await notebook.save()
             table, data = create.call_args.args
             assert table == "notebook"
-            assert data["owner"] == TEST_ADMIN_USER.id
+            assert data["owner"] == RecordID.parse(TEST_ADMIN_USER.id)
     finally:
         _reset_user(token)
 
@@ -143,7 +144,7 @@ async def test_save_keeps_explicit_owner():
             )
             await notebook.save()
             _, _, data = update.call_args.args
-            assert data["owner"] == "user:worker-owner"
+            assert data["owner"] == RecordID.parse("user:worker-owner")
     finally:
         _reset_user(token)
 
@@ -169,7 +170,7 @@ async def test_global_or_user_tables_allow_global_rows():
         _reset_user(token)
     for query, params in fake.calls:
         assert "owner = $owner OR owner = NONE" in query
-        assert params["owner"] == TEST_ADMIN_USER.id
+        assert params["owner"] == RecordID.parse(TEST_ADMIN_USER.id)
 
 
 @pytest.mark.asyncio
@@ -186,7 +187,7 @@ async def test_credential_queries_allow_global_rows():
         _reset_user(token)
     for query, params in fake.calls:
         assert "owner = $owner OR owner = NONE" in query
-        assert params["owner"] == TEST_ADMIN_USER.id
+        assert params["owner"] == RecordID.parse(TEST_ADMIN_USER.id)
 
 
 @pytest.mark.asyncio
@@ -202,7 +203,7 @@ async def test_model_get_models_by_type_allows_global_rows():
         _reset_user(token)
     query, params = fake.calls[0]
     assert "owner = $owner OR owner = NONE" in query
-    assert params["owner"] == TEST_ADMIN_USER.id
+    assert params["owner"] == RecordID.parse(TEST_ADMIN_USER.id)
 
 
 # ---------------------------------------------------------------------------
@@ -224,7 +225,7 @@ async def test_text_search_receives_owner():
     query, params = fake.calls[0]
     assert "fn::text_search" in query
     assert "$owner" in query
-    assert params["owner"] == TEST_ADMIN_USER.id
+    assert params["owner"] == RecordID.parse(TEST_ADMIN_USER.id)
 
 
 @pytest.mark.asyncio
@@ -259,7 +260,7 @@ async def test_vector_search_receives_owner():
     query, params = fake.calls[0]
     assert "fn::vector_search" in query
     assert "$owner" in query
-    assert params["owner"] == TEST_ADMIN_USER.id
+    assert params["owner"] == RecordID.parse(TEST_ADMIN_USER.id)
 
 
 @pytest.mark.asyncio
@@ -323,8 +324,8 @@ async def test_embed_source_records_inherit_owner():
 
     assert result.success is True
     assert [r.get("owner") for r in inserted["records"]] == [
-        "user:owner-x",
-        "user:owner-x",
+        RecordID.parse("user:owner-x"),
+        RecordID.parse("user:owner-x"),
     ]
 
 
@@ -356,7 +357,7 @@ async def test_create_insight_inherits_owner():
     assert result.success is True
     query, params = fake.calls[0]
     assert '"owner": $owner' in query
-    assert params["owner"] == "user:owner-x"
+    assert params["owner"] == RecordID.parse("user:owner-x")
 
 
 @pytest.mark.asyncio
@@ -442,7 +443,7 @@ async def test_user_b_cannot_fetch_admin_notebook(two_user_session):
     async def fake_query(query, params=None):
         calls.append((query, params or {}))
         # "The database": only rows matching the requested owner exist.
-        if (params or {}).get("owner") == TEST_USER_B.id:
+        if str((params or {}).get("owner")) == TEST_USER_B.id:
             return []
         return [dict(admin_row)]
 
@@ -456,8 +457,8 @@ async def test_user_b_cannot_fetch_admin_notebook(two_user_session):
     assert len(fetch_calls) == 2
     for query, params in fetch_calls:
         assert "owner = $owner" in query
-    assert fetch_calls[0][1]["owner"] == TEST_ADMIN_USER.id
-    assert fetch_calls[1][1]["owner"] == TEST_USER_B.id
+    assert fetch_calls[0][1]["owner"] == RecordID.parse(TEST_ADMIN_USER.id)
+    assert fetch_calls[1][1]["owner"] == RecordID.parse(TEST_USER_B.id)
 
 
 @pytest.mark.asyncio

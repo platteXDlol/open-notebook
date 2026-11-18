@@ -91,10 +91,17 @@ class ObjectModel(BaseModel):
         user = current_user.get()
         if user is None:
             return None, {}
+        # owner is a record<user> field: the SDK does not coerce "user:xxx"
+        # strings, and WHERE owner = $owner with a string param silently
+        # matches nothing, so always bind a RecordID.
+        user_id = user.id
+        if user_id is None:
+            return None, {}
+        owner_id = ensure_record_id(user_id)
         if cls.global_or_user:
             # Global rows (owner NONE) stay visible to every user.
-            return "owner = $owner OR owner = NONE", {"owner": user.id}
-        return "owner = $owner", {"owner": user.id}
+            return "owner = $owner OR owner = NONE", {"owner": owner_id}
+        return "owner = $owner", {"owner": owner_id}
 
     @classmethod
     async def get_all(cls: Type[T], order_by=None) -> List[T]:
@@ -215,6 +222,14 @@ class ObjectModel(BaseModel):
                 repo_result = await repo_update(
                     self.__class__.table_name, self.id, data
                 )
+            # owner is a record<user> field; the SDK does not coerce
+            # "user:xxx" strings on write (insert/merge fail), so hand the
+            # DB a RecordID. Covers created stamps, updated rows, and
+            # job-set owners inherited from the parent record.
+            if (self.__class__.owned or self.__class__.global_or_user) and data.get(
+                "owner"
+            ):
+                data["owner"] = ensure_record_id(data["owner"])
             # Update the current instance with the result
             # repo_result is a list of dictionaries
             result_list: List[Dict[str, Any]] = (
