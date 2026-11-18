@@ -42,6 +42,7 @@ from open_notebook.exceptions import (
     OpenNotebookError,
     UnsupportedTypeException,
 )
+from open_notebook.utils.current_user import require_user
 
 router = APIRouter()
 
@@ -522,6 +523,7 @@ async def _create_source_async_path(
             notebook_ids=source_data.notebooks,
             transformations=transformation_ids,
             embed=source_data.embed,
+            user_id=require_user().id,
         )
 
         command_id = await CommandService.submit_command_job(
@@ -599,6 +601,7 @@ async def _create_source_sync_path(
             notebook_ids=source_data.notebooks,
             transformations=transformation_ids,
             embed=source_data.embed,
+            user_id=require_user().id,
         )
 
         # Run in thread pool to avoid blocking the event loop
@@ -1011,6 +1014,7 @@ async def retry_source_processing(source_id: str):
                 notebook_ids=notebook_ids,
                 transformations=[],  # Use default transformations on retry
                 embed=True,  # Always embed on retry
+                user_id=require_user().id,
             )
 
             command_id = await CommandService.submit_command_job(
@@ -1142,6 +1146,7 @@ async def create_source_insight(source_id: str, request: CreateSourceInsightRequ
             {
                 "source_id": source_id,
                 "transformation_id": request.transformation_id,
+                "user_id": require_user().id,
             },
         )
         logger.info(

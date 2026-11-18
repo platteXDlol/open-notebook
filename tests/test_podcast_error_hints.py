@@ -9,6 +9,7 @@ provider - a truncated Gemini response was told to switch to gpt-4o.
 from unittest.mock import AsyncMock, patch
 
 import pytest
+from conftest import TEST_ADMIN_USER
 from langchain_core.exceptions import OutputParserException
 
 from commands.podcast_commands import (
@@ -84,6 +85,7 @@ class TestHintsReachTheUser:
             episode_profile="Test Episode Profile",
             episode_name="Test Episode",
             content="Some content",
+            user_id="user:tests",
         )
 
     @pytest.mark.asyncio
@@ -95,9 +97,15 @@ class TestHintsReachTheUser:
         )
         assert isinstance(parse_error, ValueError)
 
-        with patch(
-            "commands.podcast_commands.EpisodeProfile.get_by_name",
-            AsyncMock(side_effect=parse_error),
+        with (
+            patch(
+                "commands.podcast_commands.EpisodeProfile.get_by_name",
+                new=AsyncMock(side_effect=parse_error),
+            ),
+            patch(
+                "open_notebook.domain.user.User.get",
+                new=AsyncMock(return_value=TEST_ADMIN_USER),
+            ),
         ):
             with pytest.raises(ValueError) as exc_info:
                 await generate_podcast_command(self.make_input())
@@ -112,9 +120,15 @@ class TestHintsReachTheUser:
 
     @pytest.mark.asyncio
     async def test_unrecognised_value_error_is_re_raised_untouched(self):
-        with patch(
-            "commands.podcast_commands.EpisodeProfile.get_by_name",
-            AsyncMock(side_effect=ValueError("Episode profile 'x' not found")),
+        with (
+            patch(
+                "commands.podcast_commands.EpisodeProfile.get_by_name",
+                new=AsyncMock(side_effect=ValueError("Episode profile 'x' not found")),
+            ),
+            patch(
+                "open_notebook.domain.user.User.get",
+                new=AsyncMock(return_value=TEST_ADMIN_USER),
+            ),
         ):
             with pytest.raises(ValueError) as exc_info:
                 await generate_podcast_command(self.make_input())

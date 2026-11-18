@@ -15,6 +15,7 @@ from open_notebook.exceptions import (
     InvalidInputError,
     NotFoundError,
 )
+from open_notebook.utils.current_user import run_as
 
 try:
     from open_notebook.graphs.source import source_graph
@@ -30,6 +31,9 @@ class SourceProcessingInput(CommandInput):
     notebook_ids: List[str]
     transformations: List[str]
     embed: bool
+    # Multi-user slice 4: the submitting user, bound by run_as before any
+    # side effect (ownership stamping, job dispatch).
+    user_id: str
 
 
 class SourceProcessingOutput(CommandOutput):
@@ -67,7 +71,8 @@ async def process_source_command(
     """
     Process source content using the source_graph workflow
     """
-    start_time = time.time()
+    async with run_as(input_data.user_id):
+        start_time = time.time()
 
     try:
         logger.info(f"Starting source processing for source: {input_data.source_id}")
@@ -193,6 +198,10 @@ class RunTransformationInput(CommandInput):
 
     source_id: str
     transformation_id: str
+    # Multi-user slice 4: the submitting user, bound by run_as before any
+    # database write. Required — legacy queued jobs without it fail
+    # validation instead of running unscoped.
+    user_id: str
 
 
 class RunTransformationOutput(CommandOutput):
@@ -244,6 +253,14 @@ async def run_transformation_command(
     - Uses exponential-jitter backoff (1-60s)
     - Does NOT retry permanent failures (ValueError for validation errors)
     """
+    async with run_as(input_data.user_id):
+        return await _run_transformation(input_data)
+
+
+async def _run_transformation(
+    input_data: RunTransformationInput,
+) -> RunTransformationOutput:
+    """Original command body: load source, run the transformation graph."""
     start_time = time.time()
 
     try:

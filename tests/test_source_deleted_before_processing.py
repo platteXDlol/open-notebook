@@ -11,6 +11,7 @@ the worker stopped consuming jobs until the process was restarted.
 from unittest.mock import AsyncMock, patch
 
 import pytest
+from conftest import TEST_ADMIN_USER
 
 import commands  # noqa: F401 -- import registers the @command decorators
 from open_notebook.exceptions import NotFoundError
@@ -27,12 +28,21 @@ async def test_missing_source_raises_permanent_error():
         notebook_ids=["notebook:whatever"],
         transformations=[],
         embed=True,
+        user_id="user:tests",
     )
 
-    with patch(
-        "commands.source_commands.Source.get",
-        new=AsyncMock(
-            side_effect=NotFoundError("source with id source:does-not-exist not found")
+    with (
+        patch(
+            "commands.source_commands.Source.get",
+            new=AsyncMock(
+                side_effect=NotFoundError(
+                    "source with id source:does-not-exist not found"
+                )
+            ),
+        ),
+        patch(
+            "open_notebook.domain.user.User.get",
+            new=AsyncMock(return_value=TEST_ADMIN_USER),
         ),
     ):
         with pytest.raises(ValueError) as excinfo:
@@ -55,11 +65,18 @@ async def test_missing_transformation_raises_permanent_error():
         notebook_ids=["notebook:whatever"],
         transformations=["transformation:gone"],
         embed=True,
+        user_id="user:tests",
     )
 
-    with patch(
-        "commands.source_commands.Transformation.get",
-        new=AsyncMock(side_effect=NotFoundError("transformation not found")),
+    with (
+        patch(
+            "commands.source_commands.Transformation.get",
+            new=AsyncMock(side_effect=NotFoundError("transformation not found")),
+        ),
+        patch(
+            "open_notebook.domain.user.User.get",
+            new=AsyncMock(return_value=TEST_ADMIN_USER),
+        ),
     ):
         with pytest.raises(ValueError, match="no longer exists"):
             await process_source_command(input_data)
@@ -98,11 +115,18 @@ async def test_transient_db_failure_stays_retryable():
         notebook_ids=["notebook:whatever"],
         transformations=[],
         embed=True,
+        user_id="user:tests",
     )
 
-    with patch(
-        "commands.source_commands.Source.get",
-        new=AsyncMock(side_effect=DatabaseOperationError("Failed to fetch")),
+    with (
+        patch(
+            "commands.source_commands.Source.get",
+            new=AsyncMock(side_effect=DatabaseOperationError("Failed to fetch")),
+        ),
+        patch(
+            "open_notebook.domain.user.User.get",
+            new=AsyncMock(return_value=TEST_ADMIN_USER),
+        ),
     ):
         with pytest.raises(DatabaseOperationError):
             await process_source_command(input_data)
@@ -118,14 +142,22 @@ async def test_run_transformation_fails_permanently_when_source_is_gone():
         run_transformation_command,
     )
 
-    with patch(
-        "commands.source_commands.Source.get",
-        new=AsyncMock(side_effect=NotFoundError("source not found")),
+    with (
+        patch(
+            "commands.source_commands.Source.get",
+            new=AsyncMock(side_effect=NotFoundError("source not found")),
+        ),
+        patch(
+            "open_notebook.domain.user.User.get",
+            new=AsyncMock(return_value=TEST_ADMIN_USER),
+        ),
     ):
         with pytest.raises(NotFoundError):
             await run_transformation_command(
                 RunTransformationInput(
-                    source_id="source:gone", transformation_id="transformation:t1"
+                    source_id="source:gone",
+                    transformation_id="transformation:t1",
+                    user_id="user:tests",
                 )
             )
 
@@ -156,6 +188,10 @@ async def test_source_deleted_during_processing_fails_permanently():
                 side_effect=NotFoundError("source with id source:abc not found")
             ),
         ),
+        patch(
+            "open_notebook.domain.user.User.get",
+            new=AsyncMock(return_value=TEST_ADMIN_USER),
+        ),
     ):
         with pytest.raises(NotFoundError):
             await process_source_command(
@@ -165,6 +201,7 @@ async def test_source_deleted_during_processing_fails_permanently():
                     notebook_ids=[],
                     transformations=[],
                     embed=False,
+                    user_id="user:tests",
                 )
             )
 
@@ -179,13 +216,21 @@ async def test_embedding_a_deleted_source_fails_permanently():
     deleted before the job ran is a permanent failure, not a retry."""
     from commands.embedding_commands import EmbedSourceInput, embed_source_command
 
-    with patch(
-        "commands.embedding_commands.Source.get",
-        new=AsyncMock(
-            side_effect=NotFoundError("source with id source:gone not found")
+    with (
+        patch(
+            "commands.embedding_commands.Source.get",
+            new=AsyncMock(
+                side_effect=NotFoundError("source with id source:gone not found")
+            ),
+        ),
+        patch(
+            "open_notebook.domain.user.User.get",
+            new=AsyncMock(return_value=TEST_ADMIN_USER),
         ),
     ):
-        result = await embed_source_command(EmbedSourceInput(source_id="source:gone"))
+        result = await embed_source_command(
+            EmbedSourceInput(source_id="source:gone", user_id="user:tests")
+        )
 
     assert result.success is False
     assert "not found" in (result.error_message or "")
@@ -196,9 +241,17 @@ async def test_embedding_db_failure_stays_retryable():
     from commands.embedding_commands import EmbedSourceInput, embed_source_command
     from open_notebook.exceptions import DatabaseOperationError
 
-    with patch(
-        "commands.embedding_commands.Source.get",
-        new=AsyncMock(side_effect=DatabaseOperationError("Failed to fetch")),
+    with (
+        patch(
+            "commands.embedding_commands.Source.get",
+            new=AsyncMock(side_effect=DatabaseOperationError("Failed to fetch")),
+        ),
+        patch(
+            "open_notebook.domain.user.User.get",
+            new=AsyncMock(return_value=TEST_ADMIN_USER),
+        ),
     ):
         with pytest.raises(DatabaseOperationError):
-            await embed_source_command(EmbedSourceInput(source_id="source:abc"))
+            await embed_source_command(
+                EmbedSourceInput(source_id="source:abc", user_id="user:tests")
+            )

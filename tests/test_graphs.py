@@ -731,18 +731,23 @@ class TestTransformationModelIdForwarding:
         assert config["configurable"]["model_id"] is None
 
     @pytest.mark.asyncio
+    @patch("open_notebook.domain.user.User.get", new_callable=AsyncMock)
     @patch("commands.source_commands.transform_graph.ainvoke", new_callable=AsyncMock)
     @patch("commands.source_commands.Transformation.get", new_callable=AsyncMock)
     @patch("commands.source_commands.Source.get", new_callable=AsyncMock)
     async def test_command_forwards_model_id(
-        self, mock_source_get, mock_transformation_get, mock_ainvoke
+        self, mock_source_get, mock_transformation_get, mock_ainvoke, mock_user_get
     ):
         """commands.source_commands.run_transformation_command forwards model_id."""
+        from conftest import TEST_ADMIN_USER
+
         from commands.source_commands import (
             RunTransformationInput,
             run_transformation_command,
         )
         from open_notebook.domain.transformation import Transformation
+
+        mock_user_get.return_value = TEST_ADMIN_USER
 
         mock_source_get.return_value = MagicMock(spec=Source)
 
@@ -753,7 +758,9 @@ class TestTransformationModelIdForwarding:
         mock_ainvoke.return_value = {"output": "result"}
 
         input_data = RunTransformationInput(
-            source_id="source:123", transformation_id="transformation:456"
+            source_id="source:123",
+            transformation_id="transformation:456",
+            user_id="user:tests",
         )
 
         await run_transformation_command(input_data)

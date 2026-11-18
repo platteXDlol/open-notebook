@@ -54,10 +54,16 @@ def test_source_with_text_is_queued(client):
         )
 
     assert response.status_code == 202
+    # Multi-user slice 4: the job carries the submitting user (bound by the
+    # session middleware in the api_session_test fixture).
     mock_submit.assert_called_once_with(
         "open_notebook",
         "run_transformation",
-        {"source_id": "source:abc", "transformation_id": "transformation:t1"},
+        {
+            "source_id": "source:abc",
+            "transformation_id": "transformation:t1",
+            "user_id": "user:tests",
+        },
     )
 
 
@@ -73,6 +79,10 @@ async def test_worker_treats_invalid_input_as_permanent():
     from open_notebook.exceptions import InvalidInputError
 
     with (
+        patch(
+            "open_notebook.domain.user.User.get",
+            new=AsyncMock(return_value=SimpleNamespace(id="user:tests")),
+        ),
         patch(
             "commands.source_commands.Source.get",
             new=AsyncMock(return_value=SimpleNamespace(full_text="")),
@@ -91,7 +101,9 @@ async def test_worker_treats_invalid_input_as_permanent():
         with pytest.raises(InvalidInputError):
             await run_transformation_command(
                 RunTransformationInput(
-                    source_id="source:abc", transformation_id="transformation:t1"
+                    source_id="source:abc",
+                    transformation_id="transformation:t1",
+                    user_id="user:tests",
                 )
             )
 

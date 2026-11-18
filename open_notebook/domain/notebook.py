@@ -15,6 +15,7 @@ from open_notebook.exceptions import (
     InvalidInputError,
     NotFoundError,
 )
+from open_notebook.utils.current_user import require_user
 
 
 class Notebook(ObjectModel):
@@ -572,7 +573,10 @@ class Source(ObjectModel):
             command_id = submit_command(
                 "open_notebook",
                 "embed_source",
-                {"source_id": str(self.id)},
+                {
+                    "source_id": str(self.id),
+                    "user_id": require_user().id,
+                },
             )
 
             command_id_str = str(command_id)
@@ -632,6 +636,7 @@ class Source(ObjectModel):
                     "source_id": str(self.id),
                     "insight_type": insight_type,
                     "content": content,
+                    "user_id": require_user().id,
                 },
             )
             logger.info(
@@ -737,7 +742,10 @@ class Note(ObjectModel):
                 command_id = submit_command(
                     "open_notebook",
                     "embed_note",
-                    {"note_id": str(self.id)},
+                    {
+                        "note_id": str(self.id),
+                        "user_id": require_user().id,
+                    },
                 )
                 logger.debug(f"Submitted embed_note command {command_id} for {self.id}")
                 return command_id
