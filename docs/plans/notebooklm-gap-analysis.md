@@ -110,3 +110,4 @@ Self-hosted, any model, global cross-notebook search, custom transformations/pro
 | Q2: self-hosted models connect by address (OpenAI-compatible URL), not bundled | Bundle model container; cloud only | User picked recommendation; keeps BRIEF "no bundled models" |
 | Podcast "like NotebookLM" = format presets (Deep Dive/Brief/Critique/Debate) + length + focus prompt | Interactive mode; simplified one-click UI | User choice |
 | C4: reject legacy .ppt/.doc/.xls with a clear message | LibreOffice conversion | User picked recommendation |
+| Docling stays opt-in (ADR-007); empty PDF extraction shows "scanned PDF – enable Docling" hint | Enable Docling in default image | User chose A: keep image small |

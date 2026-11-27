@@ -53,3 +53,4 @@ Main gap = multi-user → implement it in our fork only. We never interact with 
 | Q2: self-hosted models connect by address (OpenAI-compatible URL), not bundled | Bundle model container; cloud only | User picked recommendation; keeps BRIEF "no bundled models" |
 | Podcast "like NotebookLM" = format presets (Deep Dive/Brief/Critique/Debate) + length + focus prompt | Interactive mode; simplified one-click UI | User choice |
 | Legacy .ppt/.doc/.xls: reject with clear message, remove from upload accept list | Convert via LibreOffice (~300 MB+) | User picked recommendation: small image, no extra code |
+| Docling stays opt-in (ADR-007); empty PDF extraction shows "scanned PDF – enable Docling" hint | Enable Docling in default image | User chose A: keep image small |
