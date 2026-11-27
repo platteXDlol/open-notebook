@@ -109,3 +109,4 @@ Self-hosted, any model, global cross-notebook search, custom transformations/pro
 | Q3: notebook chat = hybrid (full text if it fits, else retrieved passages; never silent truncation) | Always retrieval; keep context stuffing | User picked recommendation |
 | Q2: self-hosted models connect by address (OpenAI-compatible URL), not bundled | Bundle model container; cloud only | User picked recommendation; keeps BRIEF "no bundled models" |
 | Podcast "like NotebookLM" = format presets (Deep Dive/Brief/Critique/Debate) + length + focus prompt | Interactive mode; simplified one-click UI | User choice |
+| C4: reject legacy .ppt/.doc/.xls with a clear message | LibreOffice conversion | User picked recommendation |
