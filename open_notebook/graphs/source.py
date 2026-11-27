@@ -1,3 +1,4 @@
+import asyncio
 import operator
 import os
 from pathlib import Path
@@ -19,6 +20,11 @@ from open_notebook.domain.content_settings import ContentSettings
 from open_notebook.domain.notebook import Asset, Source
 from open_notebook.domain.transformation import Transformation
 from open_notebook.graphs.transformation import graph as transform_graph
+from open_notebook.utils.document_extraction import (
+    EXTRACTORS,
+    SCANNED_PDF_MESSAGE,
+    legacy_format_message,
+)
 from open_notebook.utils.runtime_capabilities import engine_runtime_missing
 from open_notebook.utils.url_validation import validate_url
 
@@ -256,13 +262,45 @@ async def content_process(state: SourceState) -> dict:
     )
 
     url = content_state.get("url") or ""
-    try:
-        processed = await extract_content(
-            url=content_state.get("url"),
-            file_path=content_state.get("file_path"),
-            content=content_state.get("content"),
-            config=config,
+    file_path = content_state.get("file_path") or ""
+    legacy_message = legacy_format_message(file_path) if file_path else None
+    if legacy_message:
+        raise ValueError(legacy_message)
+
+    # Our extractors keep tables/notes/page markers that content-core's simple
+    # engine drops; Docling (when usable) still handles documents, incl. OCR.
+    engine = config_kwargs.get("document_engine", "auto")
+    suffix = Path(file_path).suffix.lower()
+    own_extractor = EXTRACTORS.get(suffix) if file_path else None
+    processed: Optional[ExtractionOutput] = None
+    if own_extractor and (
+        engine == "simple"
+        or (engine == "auto" and engine_runtime_missing("docling") is not None)
+    ):
+        try:
+            text = await asyncio.to_thread(own_extractor, file_path)
+        except Exception as e:
+            logger.opt(exception=True).warning(f"Own {suffix} extraction failed")
+            raise ValueError(
+                f"Could not read this {suffix} file. It may be damaged or "
+                "password-protected."
+            ) from e
+        if not text.strip() and suffix == ".pdf":
+            raise ValueError(SCANNED_PDF_MESSAGE)
+        processed = ExtractionOutput(
+            content=text,
+            title=Path(file_path).stem,
+            source_type="file",
+            identified_type=suffix.lstrip("."),
         )
+    try:
+        if processed is None:
+            processed = await extract_content(
+                url=content_state.get("url"),
+                file_path=content_state.get("file_path"),
+                content=content_state.get("content"),
+                config=config,
+            )
     except cc.ContentCoreError as e:
         logger.warning(f"content-core extraction failed ({type(e).__name__}): {e}")
         raise _extraction_error(e, url) from e

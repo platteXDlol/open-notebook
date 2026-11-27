@@ -336,7 +336,7 @@ class TestContentProcessDeleteSource:
             title="Doc", content="extracted text"
         )
 
-        uploaded = tmp_path / "upload.pdf"
+        uploaded = tmp_path / "upload.epub"
         uploaded.write_text("data")
 
         state = {
@@ -374,7 +374,7 @@ class TestContentProcessDeleteSource:
         mock_model_manager.return_value = mm_instance
         mock_extract.return_value = ExtractionOutput(title="Doc", content="text")
 
-        uploaded = tmp_path / "upload.pdf"
+        uploaded = tmp_path / "upload.epub"
         uploaded.write_text("data")
 
         state = {
