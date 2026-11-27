@@ -75,7 +75,7 @@ async def _run(state, extract):
             "not supported",
         ),
         (
-            {"file_path": "/tmp/x.pdf"},
+            {"file_path": "/tmp/x.epub"},
             cc.FileOperationError("corrupted PDF"),
             "could not be read",
         ),

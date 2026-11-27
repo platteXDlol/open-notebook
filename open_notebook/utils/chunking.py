@@ -473,6 +473,9 @@ def chunk_text(
 
     # Filter out empty chunks
     chunks = [c.strip() for c in chunks if c and c.strip()]
+    # Before the min-size filter: a bare "[Page N]" chunk is dropped there, but
+    # its marker must still reach the chunks that follow it.
+    chunks = _carry_position_markers(chunks)
 
     # Drop chunks below the minimum token threshold. These are typically
     # punctuation or single-character fragments left over from header-based
@@ -492,3 +495,23 @@ def chunk_text(
 
     logger.debug(f"Created {len(chunks)} chunks from {text_tokens} tokens")
     return chunks
+
+
+_POSITION_MARKER = re.compile(r"\[(?:Page|Slide) \d+\]")
+
+
+def _carry_position_markers(chunks: List[str]) -> List[str]:
+    """Prefix chunks with the [Page N]/[Slide N] marker of the text they continue."""
+    current: Optional[str] = None
+    result = []
+    for chunk in chunks:
+        if _POSITION_MARKER.fullmatch(chunk):
+            current = chunk  # a bare marker carries no content to embed
+            continue
+        if current and not _POSITION_MARKER.match(chunk):
+            chunk = f"{current}\n\n{chunk}"
+        markers = _POSITION_MARKER.findall(chunk)
+        if markers:
+            current = markers[-1]
+        result.append(chunk)
+    return result or chunks

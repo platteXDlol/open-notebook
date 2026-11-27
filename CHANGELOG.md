@@ -20,6 +20,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Removed
 
+- **Old binary Office uploads (`.ppt`, `.doc`, `.xls`).** These files are no longer offered in the upload dialog and are rejected with a message to save them as `.pptx`/`.docx`/`.xlsx`; they never worked.
 - **`OPEN_NOTEBOOK_PASSWORD` and the Bearer password middleware.** The single global password is replaced by per-user session accounts, so authentication is always on and the startup warning about an unset password is gone
 
 ### Security
@@ -28,6 +29,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Login rate limiting.** Failed logins are tracked per username and IP address; more than 10 failures within 5 minutes makes the login endpoint answer `429`.
 
 ### Fixed
+- **Lecture slides and handouts are read completely.** PPTX uploads now keep text in tables, grouped shapes and speaker notes, DOCX uploads keep tables, and PDF/PPTX text is marked per page/slide (`[Page N]`/`[Slide N]`) so search chunks know where they come from. Scanned PDFs without Docling now fail with a message explaining how to enable it.
 - The provider credential dialog (Manage → Models → Add configuration) fits on short screens. It is capped at 90% of the window height and the form scrolls inside it, so the title, the close button and the Save/Cancel buttons stay reachable (#1507)
 - Transformation deletion confirmations no longer show a source-deletion title (#1402)
 - **`NEXT_PUBLIC_API_URL=/api` no longer requests `/api/api/...`.** A trailing `/api` on the API URL is dropped once, when the URL is resolved, so every request that adds its own `/api` (config check, API client, sign-in) gets a single one (#1522)

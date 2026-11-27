@@ -46,6 +46,9 @@ dependencies = [
     "numpy>=2.4.1",
     "pycountry>=26.2.16",
     "babel>=2.18.0",
+    "python-pptx>=1.0.2,<2",
+    "python-docx>=1.2.0,<2",
+    "pdfplumber>=0.11.10,<0.12",
 ]
 
 [tool.setuptools]

@@ -72,7 +72,7 @@ async def test_docling_selection_falls_back_to_auto_when_runtime_missing():
         patch.object(source_graph, "UPLOADS_FOLDER", "/tmp"),
     ):
         await source_graph.content_process(
-            {"content_state": {"file_path": "/tmp/doc.pdf"}}  # type: ignore[typeddict-item]
+            {"content_state": {"file_path": "/tmp/doc.epub"}}  # type: ignore[typeddict-item]
         )
 
     config = mock_extract.call_args.kwargs["config"]

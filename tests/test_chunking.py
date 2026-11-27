@@ -4,6 +4,8 @@ Unit tests for the open_notebook.utils.chunking module.
 Tests content type detection and text chunking functionality.
 """
 
+import re
+
 import pytest
 
 from open_notebook.utils.chunking import (
@@ -367,3 +369,26 @@ Content for section 2.
 
 if __name__ == "__main__":
     pytest.main([__file__, "-v"])
+
+
+class TestChunkPositionMarkers:
+    """Chunks carry the page/slide marker they come from (ingestion-fixes AC3)."""
+
+    def test_every_chunk_carries_its_page_marker(self):
+        pages = [
+            f"[Page {n}]\n\n" + " ".join(f"word{n}_{i}" for i in range(900))
+            for n in (1, 2)
+        ]
+        chunks = chunk_text("\n\n".join(pages), content_type=ContentType.PLAIN)
+
+        assert len(chunks) > 4
+        assert all(re.match(r"\[(Page|Slide) \d+\]", c) for c in chunks)
+        for chunk in chunks:
+            body_page = re.search(r"word(\d)_", chunk).group(1)  # type: ignore[union-attr]
+            assert chunk.startswith(f"[Page {body_page}]")
+
+    def test_text_without_markers_is_unchanged(self):
+        text = " ".join(f"plain{i}" for i in range(2000))
+        chunks = chunk_text(text, content_type=ContentType.PLAIN)
+
+        assert not any(c.startswith("[") for c in chunks)
