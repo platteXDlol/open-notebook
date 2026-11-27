@@ -48,3 +48,7 @@ Main gap = multi-user → implement it in our fork only. We never interact with 
 | Fix ingestion first (C1–C4) | Study tools first | User choice; wrong extraction poisons every answer |
 | Citations at page/slide level | Exact-quote highlighting | User: page or slide is enough |
 | Study tool order: quiz → flashcards → study guide → mind map → podcast like NotebookLM | Other orders | User choice |
+| Q6: OCR = Docling (default for scans) + optional vision model via OpenAI-compatible URL | Docling only; vision only; Tesseract | User picked recommendation: both already wired, vision covers handwriting/diagrams |
+| Q3: notebook chat = hybrid (full text if it fits, else retrieved passages; never silent truncation) | Always retrieval; keep context stuffing | User picked recommendation |
+| Q2: self-hosted models connect by address (OpenAI-compatible URL), not bundled | Bundle model container; cloud only | User picked recommendation; keeps BRIEF "no bundled models" |
+| Podcast "like NotebookLM" = format presets (Deep Dive/Brief/Critique/Debate) + length + focus prompt | Interactive mode; simplified one-click UI | User choice |

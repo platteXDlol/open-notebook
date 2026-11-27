@@ -1,6 +1,6 @@
 # NotebookLM gap analysis — studying for tests from PPTX / PDF / DOCX
 
-Status: **partly decided** (see Decision Log). Open: Q2, Q3, Q6, podcast scope.
+Status: **all open questions decided** (see Decision Log). Next: per-feature plans with acceptance criteria.
 Base: `fork/main` @ `81abb42` (multi-user slices 1–3 merged). Date: 2026-11-27.
 
 Use case being measured:
@@ -105,3 +105,7 @@ Self-hosted, any model, global cross-notebook search, custom transformations/pro
 | Q4: page/slide-level citations | Exact-quote highlight | User: page or slide is enough |
 | Q5: quiz → flashcards → study guide → mind map → NotebookLM-like podcast | Other orders | User choice |
 | Q7: update BRIEF non-goals + Decision Log | Leave BRIEF | User: yes |
+| Q6: OCR = Docling (default for scans) + optional vision model via OpenAI-compatible URL | Docling only; vision only; Tesseract | User picked recommendation: both already wired, vision covers handwriting/diagrams |
+| Q3: notebook chat = hybrid (full text if it fits, else retrieved passages; never silent truncation) | Always retrieval; keep context stuffing | User picked recommendation |
+| Q2: self-hosted models connect by address (OpenAI-compatible URL), not bundled | Bundle model container; cloud only | User picked recommendation; keeps BRIEF "no bundled models" |
+| Podcast "like NotebookLM" = format presets (Deep Dive/Brief/Critique/Debate) + length + focus prompt | Interactive mode; simplified one-click UI | User choice |
