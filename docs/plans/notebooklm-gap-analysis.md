@@ -1,6 +1,6 @@
 # NotebookLM gap analysis — studying for tests from PPTX / PDF / DOCX
 
-Status: **analysis only, nothing decided.** Every item ends in an open question for the user.
+Status: **partly decided** (see Decision Log). Open: Q2, Q3, Q6, podcast scope.
 Base: `fork/main` @ `81abb42` (multi-user slices 1–3 merged). Date: 2026-11-27.
 
 Use case being measured:
@@ -101,4 +101,7 @@ Self-hosted, any model, global cross-notebook search, custom transformations/pro
 ## Decision Log
 | Decision | Alternatives | Why |
 |---|---|---|
-| _(none yet)_ | | |
+| Q1: ingestion fixes C1–C4 first | Study tools first | User: yes (2026-11-27) |
+| Q4: page/slide-level citations | Exact-quote highlight | User: page or slide is enough |
+| Q5: quiz → flashcards → study guide → mind map → NotebookLM-like podcast | Other orders | User choice |
+| Q7: update BRIEF non-goals + Decision Log | Leave BRIEF | User: yes |

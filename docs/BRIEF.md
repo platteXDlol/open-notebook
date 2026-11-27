@@ -6,7 +6,7 @@ Why: data never leaves the user's own server. Who: people who self-host it; seve
 Size: medium (no compliance, no hosted data, no multi-region). Target: thin usable MVP in a few weeks.
 
 ## Non-goals (MVP)
-Images/YouTube/audio sources · quizzes/flashcards · summaries · explainer video · fine-tuning · bundled models/Ollama · desktop app (maybe later) · hosted/cloud version.
+Images/YouTube/audio sources · explainer video · fine-tuning · bundled models/Ollama · desktop app (maybe later) · hosted/cloud version.
 
 ## Assumptions (unconfirmed defaults)
 - Scale: ~1–20 users, ≤500 sources (≤50 MB each) per instance.
@@ -24,7 +24,8 @@ Main gap = multi-user → implement it in our fork only. We never interact with 
 2. Map its stack/data model; estimate multi-user (auth, per-user notebooks, admin keys + per-user key override).
 3. Write `docs/plans/multi-user.md` (goal, acceptance criteria, slices) for the implementing agent.
 4. Implement multi-user + key-override, TDD.
-5. Later: images/YouTube/audio sources, quizzes/flashcards, explainer video.
+5. Study features (from `docs/plans/notebooklm-gap-analysis.md`): fix PPTX/DOCX/PDF ingestion + page/slide citations, then quiz → flashcards → study guide → mind map → NotebookLM-style podcast.
+6. Later: images/YouTube/audio sources, explainer video.
 
 ## Decision Log
 | Decision | Alternatives | Why |
@@ -43,3 +44,7 @@ Main gap = multi-user → implement it in our fork only. We never interact with 
 | Build on Open Notebook | Kotaemon; from scratch | Covers MVP + podcasts, MIT; only gap multi-user |
 | Fork-only, no upstream interaction | Upstream-first via #712 / Discussion #1254 | User choice; upstream design is post-v2 and undecided |
 | Keep pulling upstream code read-only | Clean break | Free bug/security fixes; accept merge conflicts |
+| Study features are in scope (2026-11-27) | Keep quizzes/summaries as non-goals | User choice; core use case is learning for tests from PPTX/PDF/DOCX |
+| Fix ingestion first (C1–C4) | Study tools first | User choice; wrong extraction poisons every answer |
+| Citations at page/slide level | Exact-quote highlighting | User: page or slide is enough |
+| Study tool order: quiz → flashcards → study guide → mind map → podcast like NotebookLM | Other orders | User choice |
